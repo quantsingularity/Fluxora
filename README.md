@@ -31,15 +31,14 @@ Fluxora is an advanced energy forecasting and optimization platform that leverag
 
 The project follows a modular and domain-driven structure to ensure maintainability and scalability.
 
-| Directory         | Content         | Description                                        |
-| :---------------- | :-------------- | :------------------------------------------------- |
-| `code/backend/`   | FastAPI API     | Core business logic and API endpoints              |
-| `code/models/`    | ML Models       | Training, prediction, and versioning logic         |
-| `code/data/`      | ETL/Pipelines   | Data ingestion, cleaning, and feature engineering  |
-| `frontend/`       | Web/Mobile UI   | Source code for the web dashboard and mobile app   |
-| `infrastructure/` | IaC             | Terraform and Kubernetes manifests for deployment  |
-| `tests/`          | Test Suites     | Unit, integration, and end-to-end tests            |
-| `scripts/`        | Utility Scripts | Helper scripts for setup, linting, and maintenance |
+├── code/                   # Core backend logic, services, and shared utilities
+├── docs/                   # Project documentation
+├── infrastructure/         # DevOps, deployment, and infra-related code
+├── mobile-frontend/        # Mobile application
+├── web-frontend/           # Web dashboard
+├── scripts/                # Automation, setup, and utility scripts
+├── LICENSE                 # License information
+└── README.md               # Project overview and instructions
 
 ## Features
 
