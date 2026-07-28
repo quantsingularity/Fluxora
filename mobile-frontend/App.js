@@ -1,26 +1,39 @@
-import { NavigationContainer } from "@react-navigation/native";
-import { Provider as PaperProvider } from "react-native-paper"; // Import PaperProvider
-import AppNavigator from "./src/navigation/AppNavigator";
 import "react-native-gesture-handler";
+import {
+  NavigationContainer,
+  DefaultTheme as NavDefaultTheme,
+} from "@react-navigation/native";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { PaperProvider } from "react-native-paper";
+import { AuthProvider } from "./src/contexts/AuthContext";
+import RootNavigator from "./src/navigation/RootNavigator";
+import { colors, lightTheme } from "./src/styles/theme";
 
-// Optional: Define a custom theme
-// import { DefaultTheme } from 'react-native-paper';
-// const theme = {
-//   ...DefaultTheme,
-//   colors: {
-//     ...DefaultTheme.colors,
-//     primary: 'tomato',
-//     accent: 'yellow',
-//   },
-// };
+const navigationTheme = {
+  ...NavDefaultTheme,
+  colors: {
+    ...NavDefaultTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.textPrimary,
+    border: colors.border,
+    notification: colors.secondary,
+  },
+};
 
 export default function App() {
   return (
-    // Wrap the entire app in PaperProvider
-    <PaperProvider>
-      <NavigationContainer>
-        <AppNavigator />
-      </NavigationContainer>
-    </PaperProvider>
+    <SafeAreaProvider>
+      <PaperProvider theme={lightTheme}>
+        <AuthProvider>
+          <NavigationContainer theme={navigationTheme}>
+            <StatusBar style="dark" />
+            <RootNavigator />
+          </NavigationContainer>
+        </AuthProvider>
+      </PaperProvider>
+    </SafeAreaProvider>
   );
 }

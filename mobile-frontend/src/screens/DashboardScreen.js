@@ -1,223 +1,304 @@
-import { useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
-  ActivityIndicator,
-  Appbar,
-  Button,
-  Card,
-  Dialog,
-  Paragraph,
-  Portal,
-  Subheading,
-  Text,
-  useTheme,
-} from "react-native-paper";
-import { getHealth, getSummary } from "../api/api"; // Import getSummary
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
+import { Button, Card, Divider, FAB, Text, Title } from "react-native-paper";
+import { LineChart } from "react-native-chart-kit";
+import StatCard from "../components/StatCard";
+import DataRecordModal from "../components/DataRecordModal";
+import { useAuth } from "../contexts/AuthContext";
+import {
+  createDataRecord,
+  getAnalytics,
+  getAnalyticsSummary,
+  getDataRecords,
+  getPredictions,
+} from "../api/api";
+import { colors, fontSize, shadows, spacing } from "../styles/theme";
 
-const DashboardScreen = ({ navigation }) => {
-  const [healthStatus, setHealthStatus] = useState("checking...");
-  const [summaryData, setSummaryData] = useState(null);
-  const [loadingHealth, setLoadingHealth] = useState(true);
-  const [loadingSummary, setLoadingSummary] = useState(true);
-  const [error, setError] = useState(null);
-  const [errorVisible, setErrorVisible] = useState(false);
-  const theme = useTheme();
+const screenWidth = Dimensions.get("window").width;
 
-  const hideErrorDialog = () => setErrorVisible(false);
+const fmtKwh = (n) =>
+  `${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh`;
+const fmtUsd = (n) =>
+  `$${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
-  useEffect(() => {
-    const checkApiHealth = async () => {
-      try {
-        setLoadingHealth(true);
-        const data = await getHealth();
-        setHealthStatus(data.status || "unknown");
-      } catch (err) {
-        console.error("Dashboard API Health Check Failed:", err);
-        setError(
-          "Failed to connect to the backend API. Please ensure it is running.",
+export default function DashboardScreen({ navigation }) {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [weekSeries, setWeekSeries] = useState([]);
+  const [recentRecords, setRecentRecords] = useState([]);
+  const [nextPeak, setNextPeak] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [modalError, setModalError] = useState(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      const [summaryRes, weekRes, recordsRes, predictionsRes] =
+        await Promise.all([
+          getAnalyticsSummary(),
+          getAnalytics("week"),
+          getDataRecords({ limit: 5 }),
+          getPredictions(1).catch(() => []),
+        ]);
+      setSummary(summaryRes);
+      setWeekSeries(weekRes || []);
+      setRecentRecords(recordsRes || []);
+      if (predictionsRes?.length) {
+        setNextPeak(
+          Math.max(...predictionsRes.map((p) => p.predicted_consumption)),
         );
-        setErrorVisible(true);
-        setHealthStatus("error");
-      } finally {
-        setLoadingHealth(false);
       }
-    };
-
-    const fetchSummary = async () => {
-      try {
-        setLoadingSummary(true);
-        const data = await getSummary();
-        setSummaryData(data);
-      } catch (err) {
-        console.error("Dashboard Fetch Summary Failed:", err);
-        // Don't show a blocking error for summary, maybe just log or show inline
-        setSummaryData(null); // Indicate failure or use placeholder
-      } finally {
-        setLoadingSummary(false);
-      }
-    };
-
-    checkApiHealth();
-    fetchSummary();
+    } catch (err) {
+      console.error("Failed to load dashboard data", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.Content title="Fluxora Dashboard" />
-        {/* <Appbar.Action icon="menu" onPress={() => navigation.openDrawer()} /> */}
-      </Appbar.Header>
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData]),
+  );
 
-      <View style={styles.content}>
-        <Card style={styles.card}>
-          <Card.Title title="System Overview" />
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadData();
+  };
+
+  const handleAddRecord = async (payload) => {
+    setSubmitting(true);
+    setModalError(null);
+    try {
+      await createDataRecord(payload);
+      setModalVisible(false);
+      loadData();
+    } catch (err) {
+      setModalError(
+        err?.response?.data?.error?.message || "Could not save this reading.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const chartLabels = weekSeries.map((d) => (d.label || "").slice(0, 3));
+  const chartValues = weekSeries.map((d) => d.consumption || 0);
+
+  return (
+    <View style={styles.root}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        <Text style={styles.greeting}>
+          Welcome back{user?.email ? `, ${user.email.split("@")[0]}` : ""}
+        </Text>
+        <Text style={styles.subGreeting}>
+          Here&apos;s your energy usage over the last 30 days.
+        </Text>
+
+        <View style={styles.statsGrid}>
+          <View style={styles.statsRow}>
+            <StatCard
+              icon="lightning-bolt"
+              label="Total Consumption"
+              value={fmtKwh(summary?.total_consumption_kwh)}
+              accent={colors.primary}
+              style={styles.statCardHalf}
+            />
+            <StatCard
+              icon="cash"
+              label="Total Cost"
+              value={fmtUsd(summary?.total_cost_usd)}
+              accent={colors.secondary}
+              style={styles.statCardHalf}
+            />
+          </View>
+          <View style={styles.statsRow}>
+            <StatCard
+              icon="speedometer"
+              label="Avg Daily Usage"
+              value={fmtKwh(summary?.avg_daily_consumption_kwh)}
+              accent={colors.warning}
+              style={styles.statCardHalf}
+            />
+            <StatCard
+              icon="chart-timeline-variant"
+              label="Predicted Peak"
+              value={nextPeak != null ? fmtKwh(nextPeak) : "—"}
+              accent={colors.error}
+              style={styles.statCardHalf}
+            />
+          </View>
+        </View>
+
+        <Card style={[styles.card, shadows.small]}>
           <Card.Content>
-            <View style={styles.statusContainer}>
-              <Text style={styles.statusLabel}>Backend API Status:</Text>
-              {loadingHealth ? (
-                <ActivityIndicator
-                  animating={true}
-                  size="small"
-                  color={theme.colors.primary}
-                />
-              ) : (
-                <Text
-                  style={[
-                    styles.statusValue,
-                    {
-                      color:
-                        healthStatus === "healthy"
-                          ? "green"
-                          : theme.colors.error,
-                    },
-                  ]}
-                >
-                  {healthStatus.toUpperCase()}
-                </Text>
-              )}
-            </View>
-            {loadingSummary ? (
-              <ActivityIndicator
-                animating={true}
-                size="small"
-                style={{ marginVertical: 10 }}
+            <Title style={styles.cardTitle}>Consumption this week</Title>
+            {chartValues.length > 0 ? (
+              <LineChart
+                data={{
+                  labels: chartLabels,
+                  datasets: [{ data: chartValues }],
+                }}
+                width={screenWidth - spacing.lg * 2 - 32}
+                height={200}
+                bezier
+                withInnerLines={false}
+                chartConfig={{
+                  backgroundGradientFrom: colors.surface,
+                  backgroundGradientTo: colors.surface,
+                  decimalPlaces: 1,
+                  color: (opacity = 1) => `rgba(5, 150, 105, ${opacity})`,
+                  labelColor: () => colors.textSecondary,
+                  propsForDots: {
+                    r: "3.5",
+                    strokeWidth: "2",
+                    stroke: colors.primary,
+                  },
+                }}
+                style={{ marginLeft: -spacing.lg, borderRadius: 12 }}
               />
-            ) : summaryData ? (
-              <View style={styles.summaryDetails}>
-                <Subheading>Key Metrics</Subheading>
-                <Paragraph>
-                  Total Predictions Made:{" "}
-                  {summaryData.totalPredictions ?? "N/A"}
-                </Paragraph>
-                <Paragraph>
-                  Average Model Accuracy:{" "}
-                  {summaryData.averageAccuracy
-                    ? `${(summaryData.averageAccuracy * 100).toFixed(1)}%`
-                    : "N/A"}
-                </Paragraph>
-                <Paragraph>
-                  Last Prediction At: {summaryData.lastPredictionTime ?? "N/A"}
-                </Paragraph>
-              </View>
             ) : (
-              <Paragraph
-                style={{ fontStyle: "italic", color: theme.colors.disabled }}
-              >
-                Summary data unavailable.
-              </Paragraph>
+              <Text style={styles.emptyText}>No readings yet this week.</Text>
             )}
           </Card.Content>
         </Card>
 
-        <Card style={styles.card}>
-          <Card.Title title="Quick Actions" />
-          <Card.Actions style={styles.actionsContainer}>
+        <Card style={[styles.card, shadows.small]}>
+          <Card.Content>
+            <Title style={styles.cardTitle}>Quick actions</Title>
             <Button
-              icon="chart-line"
-              mode="contained"
+              mode="outlined"
+              style={styles.actionButton}
               onPress={() => navigation.navigate("Predictions")}
-              style={styles.button}
             >
-              Predictions
+              View forecasts
             </Button>
             <Button
-              icon="google-analytics"
-              mode="contained"
+              mode="outlined"
+              style={styles.actionButton}
               onPress={() => navigation.navigate("Analytics")}
-              style={styles.button}
             >
-              Analytics
+              Explore analytics
             </Button>
-          </Card.Actions>
+            <Button
+              mode="outlined"
+              style={styles.actionButton}
+              onPress={() => navigation.navigate("Data")}
+            >
+              Manage data records
+            </Button>
+          </Card.Content>
         </Card>
 
-        <Text style={styles.infoText}>
-          Welcome to the Fluxora mobile application.
-        </Text>
-      </View>
+        <Card
+          style={[styles.card, shadows.small, { marginBottom: spacing.xxl }]}
+        >
+          <Card.Content>
+            <Title style={styles.cardTitle}>Recent readings</Title>
+            {recentRecords.length === 0 ? (
+              <Text style={styles.emptyText}>No readings logged yet.</Text>
+            ) : (
+              recentRecords.map((r, idx) => (
+                <View key={r.id}>
+                  <View style={styles.recordRow}>
+                    <View>
+                      <Text style={styles.recordDate}>
+                        {new Date(r.timestamp).toLocaleDateString()}
+                      </Text>
+                      <Text style={styles.recordTime}>
+                        {new Date(r.timestamp).toLocaleTimeString()}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={styles.recordValue}>
+                        {fmtKwh(r.consumption_kwh)}
+                      </Text>
+                      {r.cost_usd != null && (
+                        <Text style={styles.recordSub}>
+                          {fmtUsd(r.cost_usd)}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  {idx < recentRecords.length - 1 && <Divider />}
+                </View>
+              ))
+            )}
+          </Card.Content>
+        </Card>
+      </ScrollView>
 
-      <Portal>
-        <Dialog visible={errorVisible} onDismiss={hideErrorDialog}>
-          <Dialog.Title>Connection Error</Dialog.Title>
-          <Dialog.Content>
-            <Paragraph>{error}</Paragraph>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={hideErrorDialog}>OK</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      <FAB
+        icon="plus"
+        label="Log reading"
+        style={styles.fab}
+        onPress={() => setModalVisible(true)}
+        loading={loading}
+      />
+
+      <DataRecordModal
+        visible={modalVisible}
+        onDismiss={() => setModalVisible(false)}
+        onSubmit={handleAddRecord}
+        submitting={submitting}
+        errorMessage={modalError}
+      />
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
+  root: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { padding: spacing.lg },
+  greeting: { fontSize: fontSize.xl, fontWeight: "800" },
+  subGreeting: {
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.lg,
   },
-  content: {
-    flex: 1,
-    padding: 15,
-  },
-  card: {
-    marginBottom: 15,
-    elevation: 3,
-  },
-  statusContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10, // Space before summary
-  },
-  statusLabel: {
-    fontSize: 16,
-    marginRight: 10,
-    color: "#555",
-  },
-  statusValue: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  summaryDetails: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-  },
-  actionsContainer: {
-    justifyContent: "space-around",
-    paddingBottom: 10,
-  },
-  button: {
-    marginHorizontal: 5,
-  },
-  infoText: {
-    fontSize: 16,
-    color: "#666",
+  statsGrid: { marginBottom: spacing.sm },
+  statsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
+  statCardHalf: { flex: 1 },
+  card: { borderRadius: 16, marginBottom: spacing.md },
+  cardTitle: { fontSize: fontSize.md, marginBottom: spacing.sm },
+  emptyText: {
+    color: colors.textMuted,
     textAlign: "center",
-    marginTop: "auto",
-    paddingBottom: 20,
+    paddingVertical: spacing.lg,
+  },
+  actionButton: { marginBottom: spacing.sm, borderRadius: 10 },
+  recordRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: spacing.sm,
+  },
+  recordDate: { fontWeight: "600" },
+  recordTime: { color: colors.textMuted, fontSize: fontSize.xs },
+  recordValue: { fontWeight: "700" },
+  recordSub: { color: colors.textMuted, fontSize: fontSize.xs },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    bottom: spacing.lg,
+    backgroundColor: colors.primary,
   },
 });
-
-export default DashboardScreen;

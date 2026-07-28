@@ -18,9 +18,12 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default project directory
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MONITORING_DIR="${PROJECT_DIR}/monitoring"
+COMPOSE=() # populated by check_docker
 
 # Function to print section headers
 print_section() {
@@ -54,12 +57,17 @@ check_directory() {
 # Function to check if Docker is installed
 check_docker() {
     if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed. Please run setup_environment.sh first."
+        print_error "Docker is not installed. Please install Docker before continuing."
         exit 1
     fi
 
-    if ! command -v docker-compose &> /dev/null; then
-        print_error "Docker Compose is not installed. Please run setup_environment.sh first."
+    if docker compose version &> /dev/null; then
+        COMPOSE=(docker compose)
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE=(docker-compose)
+    else
+        print_error "Neither 'docker compose' nor 'docker-compose' is available."
+        print_warning "Install Docker Compose (it ships with modern Docker Desktop/Engine)."
         exit 1
     fi
 }
@@ -76,6 +84,8 @@ create_monitoring_structure() {
     # Create subdirectories
     mkdir -p "${MONITORING_DIR}/prometheus"
     mkdir -p "${MONITORING_DIR}/grafana/dashboards"
+    mkdir -p "${MONITORING_DIR}/grafana/provisioning/dashboards"
+    mkdir -p "${MONITORING_DIR}/grafana/provisioning/datasources"
     mkdir -p "${MONITORING_DIR}/alertmanager"
     mkdir -p "${MONITORING_DIR}/data/prometheus"
     mkdir -p "${MONITORING_DIR}/data/grafana"
@@ -105,15 +115,28 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
+  # NOTE: 'api' and 'web-frontend' are service names from
+  # code/backend/docker-compose.yml's network -- a completely separate
+  # Docker Compose project from this monitoring stack, so those hostnames
+  # would never resolve here. host.docker.internal reaches ports published
+  # on the host machine instead (see the extra_hosts entry for this
+  # service in create_docker_compose, needed for Linux; Docker Desktop
+  # supports it natively on macOS/Windows).
+  #
+  # Also honestly: the Fluxora backend does not currently expose a
+  # /metrics endpoint (no prometheus_client instrumentation is wired into
+  # app/main.py), so this target will show as down until that's added --
+  # this scrape config is ready for when it is, not a working integration
+  # today.
   - job_name: 'fluxora_api'
     metrics_path: '/metrics'
     static_configs:
-      - targets: ['api:8000']
+      - targets: ['host.docker.internal:8000']
 
   - job_name: 'fluxora_frontend'
     metrics_path: '/metrics'
     static_configs:
-      - targets: ['web-frontend:3000']
+      - targets: ['host.docker.internal:3000']
 
   - job_name: 'node_exporter'
     static_configs:
@@ -195,8 +218,14 @@ EOF
 create_grafana_dashboards() {
     print_section "Creating Grafana Dashboards"
 
-    # Create Grafana datasource configuration
-    cat > "${MONITORING_DIR}/grafana/datasources/prometheus.yml" << EOF
+    # Create Grafana datasource configuration.
+    # Bug fix: this previously wrote to grafana/datasources/prometheus.yml,
+    # a directory that was never created (an immediate crash under `set -e`)
+    # and, even if created, is never mounted into the Grafana container --
+    # only ./grafana/provisioning is (see create_docker_compose below).
+    # Grafana's own provisioning convention expects datasource configs
+    # under <provisioning-path>/datasources/, so this now writes there.
+    cat > "${MONITORING_DIR}/grafana/provisioning/datasources/prometheus.yml" << EOF
 apiVersion: 1
 
 datasources:
@@ -471,6 +500,12 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: fluxora_prometheus
+    # Lets the container reach ports published on the host (e.g. the
+    # Fluxora API on :8000) via host.docker.internal. Docker Desktop
+    # (macOS/Windows) supports this natively; this extra_hosts entry is
+    # what makes it work on Linux too (Docker 20.10+).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus:/etc/prometheus
       - ./data/prometheus:/prometheus
@@ -512,7 +547,11 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
     ports:
-      - "3000:3000"
+      # Bug fix: this was previously mapped to host port 3000, exactly the
+      # port the web-frontend's Vite dev server uses (see
+      # web-frontend/vite.config.js). Running start_services.sh and this
+      # monitoring stack at the same time would fight over the same port.
+      - "3001:3000"
     restart: unless-stopped
     networks:
       - fluxora-monitoring
@@ -527,7 +566,7 @@ services:
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)(\$|/)'
     ports:
       - "9100:9100"
     restart: unless-stopped
@@ -549,10 +588,10 @@ start_monitoring() {
     cd "$MONITORING_DIR"
 
     print_warning "Starting monitoring stack with Docker Compose..."
-    docker-compose up -d
+    "${COMPOSE[@]}" up -d
 
     print_success "Monitoring stack started successfully"
-    print_warning "Grafana dashboard is available at http://localhost:3000"
+    print_warning "Grafana dashboard is available at http://localhost:3001"
     print_warning "Default credentials: admin/admin"
     print_warning "Prometheus is available at http://localhost:9090"
     print_warning "Alertmanager is available at http://localhost:9093"
@@ -565,7 +604,7 @@ stop_monitoring() {
     cd "$MONITORING_DIR"
 
     print_warning "Stopping monitoring stack..."
-    docker-compose down
+    "${COMPOSE[@]}" down
 
     print_success "Monitoring stack stopped successfully"
 }
@@ -593,7 +632,7 @@ setup_monitoring() {
         start_monitoring
     else
         print_warning "You can start the monitoring stack later with:"
-        print_warning "cd ${MONITORING_DIR} && docker-compose up -d"
+        print_warning "cd ${MONITORING_DIR} && docker compose up -d"
         print_warning "or use the start_services.sh script with the 'monitoring' option"
     fi
 }

@@ -1,89 +1,58 @@
-# Fluxora Automation Scripts
+# Fluxora Scripts
 
-This directory contains a collection of automation scripts for the Fluxora repository. These scripts are designed to streamline common development, testing, and deployment tasks.
+Utility scripts for developing, testing, and operating Fluxora. All scripts
+resolve the project root **relative to their own location** (not your
+current directory), so they work correctly whether you run them as
+`./script.sh` from inside `scripts/` or as `./scripts/script.sh` from the
+repo root.
 
-## Available Scripts
+## Scripts
 
-1. **setup_environment.sh** - Automates the setup of development environment prerequisites
-2. **docker_manager.sh** - Simplifies Docker operations (build, start, stop, status)
-3. **install_dependencies.sh** - Installs all required dependencies for different components
-4. **start_services.sh** - Starts all required services in the correct order
-5. **api_tester.sh** - Tests API endpoints and generates example requests
-6. **monitoring_setup.sh** - Configures and launches the monitoring stack
-7. **run_tests.sh** - Executes tests for different components with reporting
-8. **dev_workflow.sh** - Automates common development tasks
-9. **deploy.sh** - Streamlines the deployment process
+| Script                   | Purpose                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `setup.sh`               | Quick-start: creates a venv and installs backend + ml_core Python dependencies              |
+| `setup_environment.sh`   | Installs dependencies for one or all components (backend, web, mobile)                      |
+| `manage_docker.sh`       | Build/start/stop/status/logs for the backend's Docker container                             |
+| `start_services.sh`      | Starts (or stops) the backend, both frontends, and the monitoring stack                     |
+| `dev_tools.sh`           | Formatting (black/isort/Prettier), linting (flake8/ESLint), Alembic migrations, git helpers |
+| `lint-all.sh`            | Repo-wide formatting/linting pass across Python, JS/TS, YAML, and Terraform                 |
+| `run_tests.sh`           | Runs the backend test suite with a coverage report                                          |
+| `test_api.sh`            | Exercises the real API end-to-end and generates example `curl` scripts                      |
+| `deploy.sh`              | Deploys to `dev` (Docker Compose), or `staging`/`prod` (Terraform + Kubernetes)             |
+| `deploy_model.sh`        | Validates, archives, and rolls back the trained forecasting model file                      |
+| `setup_monitoring.sh`    | Generates a standalone Prometheus + Grafana + Alertmanager stack                            |
+| `sync_data.sh`           | Seeds realistic historical data via the real API, or syncs raw data from S3                 |
+| `fetch_realtime_data.py` | Simulates a live meter feed, streaming readings into the API                                |
+| `clean.sh`               | Removes build artifacts, caches, and installed dependencies                                 |
 
-## Usage
-
-All scripts include detailed help information that can be accessed using the `-h` or `--help` flag:
-
-```bash
-./script_name.sh --help
-```
-
-### Common Options
-
-Most scripts support the following options:
-
-- `-d, --directory` - Specify the Fluxora project directory (default: current directory)
-- `-h, --help` - Show help message
-
-### Typical Workflow
-
-1. Set up your environment:
-
-   ```bash
-   ./setup_environment.sh
-   ```
-
-2. Install dependencies:
-
-   ```bash
-   ./install_dependencies.sh
-   ```
-
-3. Start services:
-
-   ```bash
-   ./start_services.sh
-   ```
-
-4. Run tests:
-
-   ```bash
-   ./run_tests.sh
-   ```
-
-5. Use development workflow tools:
-
-   ```bash
-   ./dev_workflow.sh format-all
-   ```
-
-6. Deploy the application:
-   ```bash
-   ./deploy.sh -e dev
-   ```
-
-## Script Permissions
-
-Make sure all scripts have execution permissions:
+## Typical workflow
 
 ```bash
-chmod +x *.sh
+cd scripts
+./setup_environment.sh          # install backend + web + mobile dependencies
+./dev_tools.sh migrate           # apply database migrations (Alembic)
+./sync_data.sh seed --days 60    # seed some realistic history (optional but
+                                  # recommended -- the forecasting model
+                                  # needs real history to do anything useful)
+./start_services.sh              # start backend + web frontend + mobile
+./test_api.sh                    # sanity-check the running API
+./run_tests.sh                   # run the backend test suite
+./start_services.sh stop         # stop everything
 ```
 
-## Requirements
+## Notes on scope
 
-- Bash shell
-- Git
-- Docker and Docker Compose (for containerized operations)
-- Python 3.9+ (for backend operations)
-- Node.js 16+ (for frontend operations)
-
-## Notes
-
-- These scripts are designed to work with the Fluxora repository structure
-- All scripts include error handling and detailed logging
-- Scripts can be run individually or as part of a workflow
+- **Backend and ml_core** (`code/backend/`, `code/ml_core/`) are the real,
+  working application these scripts operate on.
+- **`infrastructure/`** ships as example Terraform/Kubernetes/Docker Compose
+  scaffolding -- it references a placeholder image registry and doesn't
+  (yet) describe this repo's actual Python backend. `deploy.sh` points at
+  the right paths within it, but staging/prod deployment still needs that
+  scaffolding adapted to the real application first. `dev` deployment,
+  by contrast, uses the real, working `code/backend/docker-compose.yml`
+  and needs no adaptation.
+- **`monitoring/`** doesn't exist until you run `setup_monitoring.sh` --
+  it's generated fresh each time, not tracked in git.
+- The backend does not currently expose a Prometheus `/metrics` endpoint,
+  so the `fluxora_api`/`fluxora_frontend` scrape targets in the generated
+  Prometheus config will show as down until that instrumentation is added.

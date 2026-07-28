@@ -1,59 +1,59 @@
-import { DarkTheme, DefaultTheme } from "react-native-paper";
+import { DefaultTheme } from "react-native-paper";
+
+// ---------------------------------------------------------------------------
+// Fluxora design tokens (mobile)
+// Mirrors the web app's palette: emerald primary, blue accent, deep ink
+// neutrals, soft elevation. Keeps the app visually consistent across
+// platforms.
+// ---------------------------------------------------------------------------
+export const colors = {
+  primary: "#059669",
+  primaryLight: "#10b981",
+  primaryDark: "#047857",
+  secondary: "#3b82f6",
+  secondaryLight: "#60a5fa",
+  secondaryDark: "#2563eb",
+  ink: "#0b1220",
+  ink2: "#0f172a",
+  background: "#f8fafc",
+  surface: "#ffffff",
+  border: "#e2e8f0",
+  textPrimary: "#0f172a",
+  textSecondary: "#475569",
+  textMuted: "#94a3b8",
+  success: "#16a34a",
+  warning: "#d97706",
+  error: "#dc2626",
+  info: "#0ea5e9",
+};
 
 /**
- * Light theme configuration
+ * Light theme configuration (react-native-paper MD3-compatible shape)
  */
 export const lightTheme = {
   ...DefaultTheme,
+  dark: false,
   colors: {
     ...DefaultTheme.colors,
-    primary: "#1976D2",
-    accent: "#FFC107",
-    background: "#F5F5F5",
-    surface: "#FFFFFF",
-    text: "#212121",
-    error: "#D32F2F",
-    success: "#388E3C",
-    warning: "#F57C00",
-    info: "#0288D1",
-    disabled: "#9E9E9E",
-    placeholder: "#757575",
-    backdrop: "#00000080",
+    primary: colors.primary,
+    accent: colors.secondary,
+    background: colors.background,
+    surface: colors.surface,
+    text: colors.textPrimary,
+    error: colors.error,
+    success: colors.success,
+    warning: colors.warning,
+    info: colors.info,
+    disabled: "#CBD5E1",
+    placeholder: colors.textMuted,
+    backdrop: "rgba(11, 18, 32, 0.5)",
+    notification: colors.secondary,
   },
-  fonts: {
-    ...DefaultTheme.fonts,
-  },
-  roundness: 8,
+  roundness: 14,
 };
 
 /**
- * Dark theme configuration
- */
-export const darkTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    primary: "#64B5F6",
-    accent: "#FFD54F",
-    background: "#121212",
-    surface: "#1E1E1E",
-    text: "#FFFFFF",
-    error: "#EF5350",
-    success: "#66BB6A",
-    warning: "#FFA726",
-    info: "#29B6F6",
-    disabled: "#757575",
-    placeholder: "#9E9E9E",
-    backdrop: "#00000080",
-  },
-  fonts: {
-    ...DarkTheme.fonts,
-  },
-  roundness: 8,
-};
-
-/**
- * Common spacing values
+ * Common spacing scale
  */
 export const spacing = {
   xs: 4,
@@ -68,54 +68,45 @@ export const spacing = {
  * Common font sizes
  */
 export const fontSize = {
-  xs: 10,
-  sm: 12,
-  md: 14,
-  lg: 16,
-  xl: 20,
-  xxl: 24,
-  xxxl: 32,
+  xs: 11,
+  sm: 13,
+  md: 15,
+  lg: 17,
+  xl: 22,
+  xxl: 28,
+  xxxl: 36,
 };
 
 /**
- * Common shadow styles
+ * Common shadow / elevation presets
  */
 export const shadows = {
   small: {
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.18,
-    shadowRadius: 1.0,
-    elevation: 1,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
   },
   medium: {
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.23,
-    shadowRadius: 2.62,
-    elevation: 3,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
   },
   large: {
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 6,
+    shadowColor: colors.ink,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 8,
   },
 };
 
 export default {
+  colors,
   lightTheme,
-  darkTheme,
   spacing,
   fontSize,
   shadows,

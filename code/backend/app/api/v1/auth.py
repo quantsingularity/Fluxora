@@ -9,25 +9,22 @@ from app.core.security import (
     get_current_active_user,
     verify_password,
 )
-from app.crud.user import create_user, get_user_by_email
+from app.crud.user import create_user, delete_user, get_user_by_email, update_user
 from app.db.dependencies import get_db
-from app.schemas.user import Token, TokenRefresh, User, UserCreate
+from app.schemas.user import (
+    ProfileUpdateResponse,
+    Token,
+    TokenRefresh,
+    User,
+    UserCreate,
+    UserProfileUpdate,
+    UserUpdate,
+)
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-_MIN_PASSWORD_LENGTH = 8
-
-
-def _validate_password(password: str) -> None:
-    """Raise HTTP 422 when password does not meet minimum requirements."""
-    if len(password) < _MIN_PASSWORD_LENGTH:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Password must be at least {_MIN_PASSWORD_LENGTH} characters long.",
-        )
 
 
 @router.post("/token", response_model=Token)
@@ -88,7 +85,6 @@ def refresh_access_token(
 @router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
 def register_user(user: UserCreate, db: Session = Depends(get_db)) -> Any:
     """Register a new user account."""
-    _validate_password(user.password)
     db_user = get_user_by_email(db, email=user.email)
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -102,3 +98,72 @@ def read_current_user(
 ) -> Any:
     """Return the currently authenticated user's profile."""
     return current_user
+
+
+@router.patch("/me", response_model=ProfileUpdateResponse)
+def update_current_user(
+    profile: UserProfileUpdate,
+    current_user: Annotated[Any, Depends(get_current_active_user)],
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Update the current user's own email and/or password.
+
+    Missing endpoint fix: ``app.crud.user.update_user`` has always fully
+    supported this (including password re-hashing), but no route ever
+    exposed it — account settings were read-only from the API's
+    perspective. Deliberately uses ``UserProfileUpdate`` rather than the
+    admin-facing ``UserUpdate`` so a user can never flip their own
+    ``is_active`` flag.
+
+    Bug fix: access/refresh tokens are keyed on email (the JWT ``sub``
+    claim). Successfully changing the email here would otherwise silently
+    invalidate the caller's current token on their very next request —
+    indistinguishable from being logged out right after saving. When the
+    email changes, a fresh token pair for the new email is issued in the
+    same response so the session carries on uninterrupted.
+    """
+    update_data = profile.model_dump(exclude_unset=True)
+    if not update_data:
+        return {"user": current_user}
+
+    email_changed = (
+        "email" in update_data and update_data["email"] != current_user.email
+    )
+    if email_changed:
+        existing = get_user_by_email(db, email=update_data["email"])
+        if existing is not None:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+    updated = update_user(
+        db, user_id=current_user.id, user_update=UserUpdate(**update_data)
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    response: dict = {"user": updated}
+    if email_changed:
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        response["access_token"] = create_access_token(
+            data={"sub": updated.email}, expires_delta=access_token_expires
+        )
+        response["refresh_token"] = create_refresh_token(data={"sub": updated.email})
+        response["token_type"] = "bearer"
+    return response
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_current_user(
+    current_user: Annotated[Any, Depends(get_current_active_user)],
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Permanently delete the current user's own account and all of their
+    energy data records (cascades via the ORM relationship).
+
+    Missing endpoint fix: ``app.crud.user.delete_user`` existed and was
+    covered by CRUD-layer tests, but was never reachable through the API.
+    """
+    deleted = delete_user(db, user_id=current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="User not found")

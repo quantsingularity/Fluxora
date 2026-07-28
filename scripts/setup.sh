@@ -1,8 +1,17 @@
 #!/bin/bash
 
-# setup.sh: Script to set up the Fluxora project environment.
+# setup.sh: Quick-start script to set up the Fluxora backend's Python
+# environment (creates a venv and installs code/backend + code/ml_core
+# dependencies).
+#
+# Safe to run from anywhere -- paths are resolved relative to this script's
+# own location, not the caller's current directory.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BACKEND_DIR="${PROJECT_DIR}/code/backend"
 
 echo "----------------------------------------"
 echo "Starting Fluxora project setup..."
@@ -19,15 +28,19 @@ if ! command -v pip3 &> /dev/null; then
     exit 1
 fi
 
-# --- 2. Create and activate a virtual environment (Recommended) ---
-VENV_DIR=".venv"
+if [ ! -f "${BACKEND_DIR}/requirements.txt" ]; then
+    echo "Error: ${BACKEND_DIR}/requirements.txt not found."
+    echo "This script expects to live in <fluxora-repo>/scripts/."
+    exit 1
+fi
+
+# --- 2. Create a virtual environment for the backend (Recommended) ---
+VENV_DIR="${BACKEND_DIR}/venv"
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment in $VENV_DIR..."
+    echo "Creating virtual environment in ${VENV_DIR}..."
     python3 -m venv "$VENV_DIR"
 fi
 
-echo "Activating virtual environment (for current shell only)..."
-# Note: We don't actually activate it in this script's shell, but we use the full path to the interpreter/pip
 PYTHON_BIN="$VENV_DIR/bin/python"
 PIP_BIN="$VENV_DIR/bin/pip"
 
@@ -38,21 +51,27 @@ if [ ! -f "$PYTHON_BIN" ]; then
     echo "Warning: Could not find venv binaries. Falling back to global python3/pip3."
 fi
 
-# --- 3. Install Python dependencies ---
-echo "Installing Python dependencies from requirements.txt..."
-"$PIP_BIN" install -r requirements.txt || {
-    echo "Error: Failed to install Python dependencies."
+# --- 3. Install Python dependencies (backend + ml_core) ---
+echo "Upgrading pip..."
+"$PIP_BIN" install --upgrade pip
+
+echo "Installing backend dependencies from code/backend/requirements.txt..."
+"$PIP_BIN" install -r "${BACKEND_DIR}/requirements.txt" || {
+    echo "Error: Failed to install backend dependencies."
     exit 1
 }
 
-# --- 4. Configure Prefect API URL (from Makefile) ---
-echo "Setting Prefect API URL..."
-# Assuming prefect is installed via requirements.txt
-"$PYTHON_BIN" -m prefect config set PREFECT_API_URL="http://localhost:4200/api" || {
-    echo "Warning: Failed to set Prefect API URL. Prefect may not be installed or configured correctly."
-}
+if [ -f "${PROJECT_DIR}/code/ml_core/requirements.txt" ]; then
+    echo "Installing ml_core dependencies (mostly already covered above)..."
+    "$PIP_BIN" install -r "${PROJECT_DIR}/code/ml_core/requirements.txt" || {
+        echo "Error: Failed to install ml_core dependencies."
+        exit 1
+    }
+fi
 
 echo "----------------------------------------"
-echo "Fluxora project setup complete."
-echo "To use the environment, run: source $VENV_DIR/bin/activate"
+echo "Fluxora backend setup complete."
+echo "To use the environment, run: source ${VENV_DIR}/bin/activate"
+echo "Then start the API with:"
+echo "  cd ${BACKEND_DIR} && uvicorn app.main:app --reload"
 echo "----------------------------------------"

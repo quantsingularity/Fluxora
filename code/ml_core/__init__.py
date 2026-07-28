@@ -15,6 +15,7 @@ from .data_validator import (
     validate_raw_data,
 )
 from .feature_engineering import (
+    build_model_features,
     create_lag_features,
     create_rolling_features,
     create_time_series_features,
@@ -33,6 +34,7 @@ __all__ = [
     "create_time_series_features",
     "create_lag_features",
     "create_rolling_features",
+    "build_model_features",
     "preprocess_data_for_model",
     # temporal_features
     "create_cyclical_features",

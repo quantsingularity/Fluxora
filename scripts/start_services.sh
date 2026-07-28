@@ -19,8 +19,11 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default project directory
-PROJECT_DIR="$(pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMPOSE=() # populated lazily by start_monitoring/stop_services
 
 # Function to print section headers
 print_section() {
@@ -51,13 +54,34 @@ check_directory() {
     return 0
 }
 
-# Function to check if a port is in use
-check_port() {
-    if lsof -Pi :$1 -sTCP:LISTEN -t >/dev/null ; then
-        return 0
+# Resolves a Docker Compose invocation, preferring the v2 plugin.
+resolve_compose() {
+    if docker compose version &> /dev/null; then
+        COMPOSE=(docker compose)
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE=(docker-compose)
     else
         return 1
     fi
+    return 0
+}
+
+# Function to check if a port is in use
+check_port() {
+    if command -v lsof &> /dev/null; then
+        if lsof -Pi :"$1" -sTCP:LISTEN -t >/dev/null 2>&1; then
+            return 0
+        else
+            return 1
+        fi
+    fi
+    # Fallback for systems without lsof: a bare TCP connect attempt using
+    # bash's built-in /dev/tcp pseudo-device, no external tool required.
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+    local result=$?
+    exec 3<&- 2>/dev/null || true
+    exec 3>&- 2>/dev/null || true
+    return $result
 }
 
 # Function to wait for a service to be available
@@ -69,8 +93,8 @@ wait_for_service() {
 
     print_warning "Waiting for $service_name to be available on port $port..."
 
-    while [ $attempt -le $max_attempts ]; do
-        if check_port $port; then
+    while [ $attempt -le "$max_attempts" ]; do
+        if check_port "$port"; then
             print_success "$service_name is available on port $port"
             return 0
         fi
@@ -88,41 +112,35 @@ wait_for_service() {
 start_backend() {
     print_section "Starting Backend Services"
 
-    if ! check_directory "${PROJECT_DIR}/src"; then
-        print_warning "Backend source directory not found, skipping..."
+    local backend_dir="${PROJECT_DIR}/code/backend"
+    if ! check_directory "$backend_dir"; then
+        print_warning "Backend directory (code/backend) not found, skipping..."
         return 1
     fi
-
-    cd "${PROJECT_DIR}/src"
 
     # Check if virtualenv exists
-    if [ ! -d "venv" ]; then
-        print_error "Python virtual environment not found"
-        print_warning "Please run install_dependencies.sh first"
+    if [ ! -x "${backend_dir}/venv/bin/python" ] && [ ! -x "${backend_dir}/.venv/bin/python" ]; then
+        print_error "Python virtual environment not found in code/backend"
+        print_warning "Please run ./setup_environment.sh first"
         return 1
     fi
 
-    # Activate virtual environment
-    print_warning "Activating virtual environment..."
-    source venv/bin/activate
+    local py="${backend_dir}/venv/bin/python"
+    [ -x "$py" ] || py="${backend_dir}/.venv/bin/python"
 
-    # Start API server in background
+    # Start API server in background (uvicorn, matching the real app
+    # entrypoint -- there is no src/api/main.py in this repo).
     print_warning "Starting API server..."
-    if [ -f "api/main.py" ]; then
-        python api/main.py > ../logs/api.log 2>&1 &
-        API_PID=$!
-        echo $API_PID > ../logs/api.pid
-        print_success "API server started with PID $API_PID"
+    (
+        cd "$backend_dir"
+        "$py" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+            > "${PROJECT_DIR}/logs/api.log" 2>&1 &
+        echo $! > "${PROJECT_DIR}/logs/api.pid"
+    )
+    print_success "API server started with PID $(cat "${PROJECT_DIR}/logs/api.pid")"
 
-        # Wait for API to be available
-        wait_for_service "API server" 8000 15
-    else
-        print_error "API main.py not found in ${PROJECT_DIR}/src/api"
-        return 1
-    fi
-
-    # Deactivate virtual environment
-    deactivate
+    # Wait for API to be available
+    wait_for_service "API server" 8000 15
 
     print_success "Backend services started successfully"
     return 0
@@ -132,35 +150,39 @@ start_backend() {
 start_web_frontend() {
     print_section "Starting Web Frontend"
 
-    if ! check_directory "${PROJECT_DIR}/web-frontend"; then
+    local frontend_dir="${PROJECT_DIR}/web-frontend"
+    if ! check_directory "$frontend_dir"; then
         print_warning "Web frontend directory not found, skipping..."
         return 1
     fi
 
-    cd "${PROJECT_DIR}/web-frontend"
-
     # Check if Node.js is installed
     if ! command -v node &> /dev/null; then
         print_error "Node.js is not installed"
-        print_warning "Please run setup_environment.sh first"
+        print_warning "Please run ./setup_environment.sh first"
         return 1
     fi
 
     # Check if dependencies are installed
-    if [ ! -d "node_modules" ]; then
-        print_error "Node.js dependencies not installed"
-        print_warning "Please run install_dependencies.sh first"
+    if [ ! -d "${frontend_dir}/node_modules" ]; then
+        print_error "Node.js dependencies not installed for web-frontend"
+        print_warning "Please run ./setup_environment.sh first"
         return 1
     fi
 
-    # Start web frontend in development mode
+    # Start web frontend in development mode. web-frontend's package.json
+    # (Vite) only defines "dev"/"build"/"preview" -- there is no "start"
+    # script, so `npm start` here would fail with "Missing script: start".
     print_warning "Starting web frontend in development mode..."
-    npm start > ../logs/web-frontend.log 2>&1 &
-    WEB_PID=$!
-    echo $WEB_PID > ../logs/web-frontend.pid
-    print_success "Web frontend started with PID $WEB_PID"
+    (
+        cd "$frontend_dir"
+        npm run dev > "${PROJECT_DIR}/logs/web-frontend.log" 2>&1 &
+        echo $! > "${PROJECT_DIR}/logs/web-frontend.pid"
+    )
+    print_success "Web frontend started with PID $(cat "${PROJECT_DIR}/logs/web-frontend.pid")"
 
-    # Wait for web frontend to be available
+    # Wait for web frontend to be available (port 3000, set in
+    # web-frontend/vite.config.js).
     wait_for_service "Web frontend" 3000 20
 
     print_success "Web frontend started successfully"
@@ -171,38 +193,42 @@ start_web_frontend() {
 start_mobile_frontend() {
     print_section "Starting Mobile Frontend"
 
-    if ! check_directory "${PROJECT_DIR}/mobile-frontend"; then
+    local frontend_dir="${PROJECT_DIR}/mobile-frontend"
+    if ! check_directory "$frontend_dir"; then
         print_warning "Mobile frontend directory not found, skipping..."
         return 1
     fi
 
-    cd "${PROJECT_DIR}/mobile-frontend"
-
     # Check if Node.js is installed
     if ! command -v node &> /dev/null; then
         print_error "Node.js is not installed"
-        print_warning "Please run setup_environment.sh first"
+        print_warning "Please run ./setup_environment.sh first"
         return 1
     fi
 
     # Check if dependencies are installed
-    if [ ! -d "node_modules" ]; then
-        print_error "Node.js dependencies not installed"
-        print_warning "Please run install_dependencies.sh first"
+    if [ ! -d "${frontend_dir}/node_modules" ]; then
+        print_error "Node.js dependencies not installed for mobile-frontend"
+        print_warning "Please run ./setup_environment.sh first"
         return 1
     fi
 
-    # Start Metro bundler for React Native
-    print_warning "Starting Metro bundler for React Native..."
-    npx react-native start > ../logs/mobile-frontend.log 2>&1 &
-    MOBILE_PID=$!
-    echo $MOBILE_PID > ../logs/mobile-frontend.pid
-    print_success "Mobile frontend bundler started with PID $MOBILE_PID"
+    # This is an Expo-managed project (see mobile-frontend/App.js and its
+    # "expo" scripts in package.json), not a bare React Native CLI project
+    # -- `npx react-native start` bypasses Expo's own dev server/tooling
+    # and is not the right way to run it.
+    print_warning "Starting Expo dev server..."
+    (
+        cd "$frontend_dir"
+        npx expo start > "${PROJECT_DIR}/logs/mobile-frontend.log" 2>&1 &
+        echo $! > "${PROJECT_DIR}/logs/mobile-frontend.pid"
+    )
+    print_success "Expo dev server started with PID $(cat "${PROJECT_DIR}/logs/mobile-frontend.pid")"
 
     print_warning "To run on a device or emulator, use a separate terminal and run:"
-    print_warning "cd ${PROJECT_DIR}/mobile-frontend && npx react-native run-android"
+    print_warning "cd ${PROJECT_DIR}/mobile-frontend && npx expo start --android"
     print_warning "or"
-    print_warning "cd ${PROJECT_DIR}/mobile-frontend && npx react-native run-ios"
+    print_warning "cd ${PROJECT_DIR}/mobile-frontend && npx expo start --ios"
 
     print_success "Mobile frontend started successfully"
     return 0
@@ -212,29 +238,31 @@ start_mobile_frontend() {
 start_monitoring() {
     print_section "Starting Monitoring Stack"
 
-    if ! check_directory "${PROJECT_DIR}/monitoring"; then
+    local monitoring_dir="${PROJECT_DIR}/monitoring"
+    if ! check_directory "$monitoring_dir"; then
         print_warning "Monitoring directory not found, skipping..."
+        print_warning "Run ./setup_monitoring.sh to create it first."
         return 1
     fi
 
-    # Check if Docker is installed
-    if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+    # Check if Docker (and a compose implementation) is installed
+    if ! command -v docker &> /dev/null || ! resolve_compose; then
         print_error "Docker or Docker Compose is not installed"
-        print_warning "Please run setup_environment.sh first"
+        print_warning "Please install Docker before continuing"
         return 1
     fi
-
-    cd "${PROJECT_DIR}/monitoring"
 
     # Start monitoring stack with Docker Compose
     print_warning "Starting monitoring stack with Docker Compose..."
-    docker-compose up -d
+    (cd "$monitoring_dir" && "${COMPOSE[@]}" up -d)
 
-    # Wait for Grafana to be available
-    wait_for_service "Grafana" 3000 30
+    # Wait for Grafana to be available. Mapped to host port 3001 (not
+    # 3000) by setup_monitoring.sh specifically to avoid colliding with
+    # the web frontend's Vite dev server, which also uses 3000.
+    wait_for_service "Grafana" 3001 30
 
     print_success "Monitoring stack started successfully"
-    print_warning "Access Grafana dashboard at http://localhost:3000"
+    print_warning "Access Grafana dashboard at http://localhost:3001"
     print_warning "Default credentials: admin/admin"
 
     return 0
@@ -258,9 +286,10 @@ check_health() {
         print_error "Web frontend is not running"
     fi
 
-    # Check if monitoring is running (Grafana)
-    if check_port 3000; then
-        print_success "Monitoring (Grafana) is running on port 3000"
+    # Check if monitoring is running (Grafana, on 3001 -- see
+    # start_monitoring's comment on why it's not 3000).
+    if check_port 3001; then
+        print_success "Monitoring (Grafana) is running on port 3001"
     else
         print_error "Monitoring (Grafana) is not running"
     fi
@@ -275,7 +304,7 @@ check_health() {
     print_section "Service URLs"
     echo "API: http://localhost:8000"
     echo "Web Dashboard: http://localhost:3000"
-    echo "Grafana: http://localhost:3000"
+    echo "Grafana: http://localhost:3001"
     echo "Prometheus: http://localhost:9090"
 }
 
@@ -285,33 +314,35 @@ stop_services() {
 
     # Stop backend
     if [ -f "${PROJECT_DIR}/logs/api.pid" ]; then
-        API_PID=$(cat "${PROJECT_DIR}/logs/api.pid")
-        print_warning "Stopping API server (PID: $API_PID)..."
-        kill -15 $API_PID 2>/dev/null || true
+        local api_pid
+        api_pid="$(cat "${PROJECT_DIR}/logs/api.pid")"
+        print_warning "Stopping API server (PID: $api_pid)..."
+        kill -15 "$api_pid" 2>/dev/null || true
         rm "${PROJECT_DIR}/logs/api.pid"
     fi
 
     # Stop web frontend
     if [ -f "${PROJECT_DIR}/logs/web-frontend.pid" ]; then
-        WEB_PID=$(cat "${PROJECT_DIR}/logs/web-frontend.pid")
-        print_warning "Stopping web frontend (PID: $WEB_PID)..."
-        kill -15 $WEB_PID 2>/dev/null || true
+        local web_pid
+        web_pid="$(cat "${PROJECT_DIR}/logs/web-frontend.pid")"
+        print_warning "Stopping web frontend (PID: $web_pid)..."
+        kill -15 "$web_pid" 2>/dev/null || true
         rm "${PROJECT_DIR}/logs/web-frontend.pid"
     fi
 
     # Stop mobile frontend
     if [ -f "${PROJECT_DIR}/logs/mobile-frontend.pid" ]; then
-        MOBILE_PID=$(cat "${PROJECT_DIR}/logs/mobile-frontend.pid")
-        print_warning "Stopping mobile frontend bundler (PID: $MOBILE_PID)..."
-        kill -15 $MOBILE_PID 2>/dev/null || true
+        local mobile_pid
+        mobile_pid="$(cat "${PROJECT_DIR}/logs/mobile-frontend.pid")"
+        print_warning "Stopping mobile frontend bundler (PID: $mobile_pid)..."
+        kill -15 "$mobile_pid" 2>/dev/null || true
         rm "${PROJECT_DIR}/logs/mobile-frontend.pid"
     fi
 
     # Stop monitoring stack
-    if check_directory "${PROJECT_DIR}/monitoring"; then
-        cd "${PROJECT_DIR}/monitoring"
+    if check_directory "${PROJECT_DIR}/monitoring" && command -v docker &> /dev/null && resolve_compose; then
         print_warning "Stopping monitoring stack..."
-        docker-compose down
+        (cd "${PROJECT_DIR}/monitoring" && "${COMPOSE[@]}" down)
     fi
 
     print_success "All services stopped successfully"
@@ -331,11 +362,16 @@ start_all() {
 
     ensure_logs_dir
 
-    # Start services in the correct order
-    start_backend
-    start_web_frontend
-    start_mobile_frontend
-    start_monitoring
+    # Start services in the correct order. Each is allowed to fail/skip
+    # (missing directory, missing deps, etc.) without aborting the rest --
+    # under `set -e`, calling these bare (without the `|| true`-style
+    # guard) would abort the entire script the moment any one of them
+    # returned non-zero, which defeats the whole "skip what's missing and
+    # keep going" behavior the rest of this script is built around.
+    start_backend || print_warning "Backend did not start -- see messages above"
+    start_web_frontend || print_warning "Web frontend did not start -- see messages above"
+    start_mobile_frontend || print_warning "Mobile frontend did not start -- see messages above"
+    start_monitoring || print_warning "Monitoring stack did not start -- see messages above"
 
     # Check health
     check_health
@@ -367,7 +403,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  -h, --help         Show this help message"
-    echo "  -d, --directory    Specify Fluxora project directory (default: current directory)"
+    echo "  -d, --directory    Specify Fluxora project directory (default: repo root, auto-detected)"
     echo ""
     echo "Examples:"
     echo "  $0                           # Start all services"

@@ -8,16 +8,22 @@ from typing import Any, Tuple
 import joblib
 import numpy as np
 import pandas as pd
-
-# Import from ml_core (sibling module) – no longer from app.services
-from ml_core.feature_engineering import preprocess_data_for_model
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
+# Import from ml_core (sibling module) – no longer from app.services
+from ml_core.data_validator import validate_energy_dataframe
+from ml_core.feature_engineering import preprocess_data_for_model
+
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = os.path.join(os.getcwd(), "fluxora_model.joblib")
+# Bug fix: this previously ignored the documented MODEL_PATH environment
+# variable (see app/core/config.py and .env.example) and always hardcoded
+# a path relative to the current working directory. Both the training
+# pipeline and the predictions endpoint now resolve the model path from
+# here, so setting MODEL_PATH actually has an effect.
+MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.getcwd(), "fluxora_model.joblib"))
 
 
 def load_data_from_db(db_session: Any = None) -> pd.DataFrame:
@@ -41,7 +47,14 @@ def load_data_from_db(db_session: Any = None) -> pd.DataFrame:
                     }
                     for r in records
                 ]
-                return pd.DataFrame(rows)
+                df = pd.DataFrame(rows)
+                validation = validate_energy_dataframe(df)
+                if validation["warnings"]:
+                    logger.warning(
+                        "Data quality warnings before training: %s",
+                        validation["warnings"],
+                    )
+                return df
         except Exception as e:
             logger.warning(f"Could not load data from DB, using synthetic: {e}")
 
@@ -60,7 +73,14 @@ def load_data_from_db(db_session: Any = None) -> pd.DataFrame:
 
 
 def train_model(df: pd.DataFrame) -> Tuple[RandomForestRegressor, dict]:
-    """Trains a RandomForestRegressor on the processed data."""
+    """Trains a RandomForestRegressor on the processed data.
+
+    Feature engineering is scoped per ``user_id`` (see
+    ``preprocess_data_for_model``'s ``group_col`` default) so that when the
+    database holds data for more than one user, one user's consumption
+    history cannot leak into another's lag/rolling features merely because
+    their rows happened to be interleaved by timestamp.
+    """
     processed_df = preprocess_data_for_model(df.copy())
     target_col = "consumption_kwh"
     features = [
@@ -78,7 +98,11 @@ def train_model(df: pd.DataFrame) -> Tuple[RandomForestRegressor, dict]:
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, shuffle=False
     )
-    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    max_depth_env = os.getenv("MODEL_MAX_DEPTH")
+    max_depth = int(max_depth_env) if max_depth_env else None
+    model = RandomForestRegressor(
+        n_estimators=100, max_depth=max_depth, random_state=42, n_jobs=-1
+    )
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
 

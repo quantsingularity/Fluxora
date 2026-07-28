@@ -49,7 +49,29 @@ class TestFeatureEngineering:
 
         df = pd.DataFrame({"consumption_kwh": [1.0, 2.0, 3.0, 4.0, 5.0]})
         result = create_rolling_features(df, "consumption_kwh", windows=[3])
-        assert result["consumption_kwh_rolling_mean_3"].iloc[2] == pytest.approx(2.0)
+        # Rolling features must be computed over the `window` rows strictly
+        # PRECEDING the current one -- never including the row's own value.
+        # A row's own consumption is exactly the label being predicted for
+        # that row, so folding it into its own feature would both leak the
+        # target during training and make the feature permanently NaN at
+        # inference time (the row being forecast has no known value yet).
+        assert pd.isna(result["consumption_kwh_rolling_mean_3"].iloc[0])
+        assert pd.isna(result["consumption_kwh_rolling_mean_3"].iloc[1])
+        assert pd.isna(result["consumption_kwh_rolling_mean_3"].iloc[2])
+        assert result["consumption_kwh_rolling_mean_3"].iloc[3] == pytest.approx(2.0)
+        assert result["consumption_kwh_rolling_mean_3"].iloc[4] == pytest.approx(3.0)
+
+    def test_rolling_features_do_not_include_current_row(self):
+        """Regression test for the target-leakage bug: a row's rolling
+        features must be computable (non-NaN) even when that row's own
+        target value is unknown/NaN, since that is exactly the situation
+        at inference time."""
+        from ml_core.feature_engineering import create_rolling_features
+
+        df = pd.DataFrame({"consumption_kwh": [1.0, 2.0, 3.0, 4.0, float("nan")]})
+        result = create_rolling_features(df, "consumption_kwh", windows=[3])
+        assert not pd.isna(result["consumption_kwh_rolling_mean_3"].iloc[4])
+        assert result["consumption_kwh_rolling_mean_3"].iloc[4] == pytest.approx(3.0)
 
     def test_preprocess_pipeline_drops_nan_rows(self):
         from ml_core.feature_engineering import preprocess_data_for_model

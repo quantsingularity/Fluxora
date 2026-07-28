@@ -1,461 +1,401 @@
 import {
-  Bolt as BoltIcon,
-  MoreVert as MoreVertIcon,
-  Speed as SpeedIcon,
-  Thermostat as ThermostatIcon,
-  TrendingDown as TrendingDownIcon,
-  TrendingUp as TrendingUpIcon,
-  WaterDrop as WaterIcon,
+  AddRounded,
+  BoltRounded,
+  PaidRounded,
+  SpeedRounded,
+  TimelineRounded,
 } from "@mui/icons-material";
 import {
+  Alert,
   Box,
+  Button,
   Card,
   CardContent,
   CardHeader,
   Chip,
-  CircularProgress,
-  Divider,
   Grid,
-  IconButton,
   Skeleton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Typography,
-  useTheme,
 } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as ChartTooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { useDataService } from "../utils/dataService";
+import { useNavigate } from "react-router-dom";
+import DataRecordDialog from "../components/DataRecordDialog";
+import StatCard from "../components/StatCard";
+import { useAuth } from "../context/AuthContext";
+import {
+  createDataRecord,
+  getAnalytics,
+  getAnalyticsSummary,
+  getDataRecords,
+  getPredictions,
+} from "../utils/api";
 
-// Energy source data
-const sourceData = [
-  { name: "Solar", value: 35 },
-  { name: "Wind", value: 25 },
-  { name: "Hydro", value: 20 },
-  { name: "Natural Gas", value: 15 },
-  { name: "Coal", value: 5 },
-];
-
-const COLORS = ["#4CAF50", "#2196F3", "#00BCD4", "#FFC107", "#F44336"];
+const fmtKwh = (n) =>
+  `${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh`;
+const fmtUsd = (n) =>
+  `$${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 const Dashboard = () => {
-  const theme = useTheme();
-  const { apiStatus, getEnergyData, getCurrentStats } = useDataService();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
   const [loading, setLoading] = useState(true);
-  const [energyData, setEnergyData] = useState([]);
-  const [stats, setStats] = useState({
-    currentConsumption: 0,
-    predictedPeak: 0,
-    temperature: 0,
-    humidity: 0,
-  });
+  const [error, setError] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [weekSeries, setWeekSeries] = useState([]);
+  const [recentRecords, setRecentRecords] = useState([]);
+  const [nextPeak, setNextPeak] = useState(null);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [dialogError, setDialogError] = useState(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [summaryRes, weekRes, recordsRes, predictionsRes] =
+        await Promise.all([
+          getAnalyticsSummary(),
+          getAnalytics("week"),
+          getDataRecords({ limit: 6 }),
+          getPredictions(1).catch(() => []),
+        ]);
+      setSummary(summaryRes);
+      setWeekSeries(weekRes || []);
+      setRecentRecords(recordsRes || []);
+      if (predictionsRes?.length) {
+        const peak = predictionsRes.reduce(
+          (max, p) =>
+            p.predicted_consumption > max ? p.predicted_consumption : max,
+          0,
+        );
+        setNextPeak(peak);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(
+        "We couldn't load your dashboard data. Pull to retry or check the API connection.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Simulate API call delay
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+    loadData();
+  }, [loadData]);
 
-        // Get energy data and current stats
-        const energyData = getEnergyData(24);
-        const currentStats = getCurrentStats();
-
-        setEnergyData(energyData);
-        setStats(currentStats);
-        setLoading(false);
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error);
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [getEnergyData, getCurrentStats]);
-
-  // Skeleton loader for stats cards
-  const StatCardSkeleton = () => (
-    <Card sx={{ height: "100%" }}>
-      <CardContent>
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            mb: 2,
-          }}
-        >
-          <Skeleton variant="text" width={120} />
-          <Skeleton variant="circular" width={40} height={40} />
-        </Box>
-        <Skeleton variant="text" width={80} height={40} />
-        <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
-          <Skeleton variant="text" width={150} />
-        </Box>
-      </CardContent>
-    </Card>
-  );
-
-  // Skeleton loader for charts
-  const ChartSkeleton = () => (
-    <Card sx={{ height: "100%" }}>
-      <CardHeader
-        title={<Skeleton variant="text" width={200} />}
-        subheader={<Skeleton variant="text" width={150} />}
-        action={
-          <IconButton disabled>
-            <MoreVertIcon />
-          </IconButton>
-        }
-      />
-      <Divider />
-      <CardContent>
-        <Box
-          sx={{
-            height: 300,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <CircularProgress />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  const handleAddRecord = async (payload) => {
+    setSubmitting(true);
+    setDialogError(null);
+    try {
+      await createDataRecord(payload);
+      setDialogOpen(false);
+      loadData();
+    } catch (err) {
+      setDialogError(
+        err?.response?.data?.error?.message || "Could not save this reading.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <Box className="fade-in">
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        Dashboard
-      </Typography>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 4 }}>
-        Overview of energy consumption and predictions
-        {apiStatus.status === "healthy" && (
-          <Chip
-            label={`API v${apiStatus.version}`}
-            size="small"
-            color="success"
-            sx={{ ml: 2 }}
+    <Box>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h4" fontWeight={800}>
+            Welcome back{user?.email ? `, ${user.email.split("@")[0]}` : ""}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Here&apos;s what&apos;s happening with your energy usage over the
+            last 30 days.
+          </Typography>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<AddRounded />}
+          onClick={() => setDialogOpen(true)}
+        >
+          Log reading
+        </Button>
+      </Stack>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            icon={<BoltRounded />}
+            label="Total Consumption"
+            value={fmtKwh(summary?.total_consumption_kwh)}
+            hint="Last 30 days"
+            accent="#059669"
+            loading={loading}
           />
-        )}
-      </Typography>
-
-      {/* Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          {loading ? (
-            <StatCardSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    mb: 2,
-                  }}
-                >
-                  <Typography color="text.secondary" variant="subtitle2">
-                    Current Consumption
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: `${theme.palette.primary.light}20`,
-                      borderRadius: "50%",
-                      width: 40,
-                      height: 40,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <BoltIcon sx={{ color: theme.palette.primary.main }} />
-                  </Box>
-                </Box>
-                <Typography variant="h4" fontWeight="bold">
-                  {stats.currentConsumption} kWh
-                </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
-                  <TrendingUpIcon
-                    sx={{
-                      color: theme.palette.success.main,
-                      fontSize: 16,
-                      mr: 0.5,
-                    }}
-                  />
-                  <Typography variant="body2" color="success.main">
-                    +5.2% from yesterday
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
         </Grid>
-
         <Grid item xs={12} sm={6} md={3}>
-          {loading ? (
-            <StatCardSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    mb: 2,
-                  }}
-                >
-                  <Typography color="text.secondary" variant="subtitle2">
-                    Predicted Peak
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: `${theme.palette.secondary.light}20`,
-                      borderRadius: "50%",
-                      width: 40,
-                      height: 40,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <SpeedIcon sx={{ color: theme.palette.secondary.main }} />
-                  </Box>
-                </Box>
-                <Typography variant="h4" fontWeight="bold">
-                  {stats.predictedPeak} kWh
-                </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Expected at 18:00
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+          <StatCard
+            icon={<PaidRounded />}
+            label="Total Cost"
+            value={fmtUsd(summary?.total_cost_usd)}
+            hint="Last 30 days"
+            accent="#3b82f6"
+            loading={loading}
+          />
         </Grid>
-
         <Grid item xs={12} sm={6} md={3}>
-          {loading ? (
-            <StatCardSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    mb: 2,
-                  }}
-                >
-                  <Typography color="text.secondary" variant="subtitle2">
-                    Temperature
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: `${theme.palette.warning.light}20`,
-                      borderRadius: "50%",
-                      width: 40,
-                      height: 40,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <ThermostatIcon
-                      sx={{ color: theme.palette.warning.main }}
-                    />
-                  </Box>
-                </Box>
-                <Typography variant="h4" fontWeight="bold">
-                  {stats.temperature}°C
-                </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
-                  <TrendingDownIcon
-                    sx={{
-                      color: theme.palette.info.main,
-                      fontSize: 16,
-                      mr: 0.5,
-                    }}
-                  />
-                  <Typography variant="body2" color="info.main">
-                    -2°C from yesterday
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+          <StatCard
+            icon={<SpeedRounded />}
+            label="Avg Daily Usage"
+            value={fmtKwh(summary?.avg_daily_consumption_kwh)}
+            hint={`${summary?.record_count ?? 0} readings logged`}
+            accent="#d97706"
+            loading={loading}
+          />
         </Grid>
-
         <Grid item xs={12} sm={6} md={3}>
-          {loading ? (
-            <StatCardSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardContent>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    mb: 2,
-                  }}
-                >
-                  <Typography color="text.secondary" variant="subtitle2">
-                    Humidity
-                  </Typography>
-                  <Box
-                    sx={{
-                      backgroundColor: `${theme.palette.info.light}20`,
-                      borderRadius: "50%",
-                      width: 40,
-                      height: 40,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <WaterIcon sx={{ color: theme.palette.info.main }} />
-                  </Box>
-                </Box>
-                <Typography variant="h4" fontWeight="bold">
-                  {stats.humidity}%
-                </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", mt: 1 }}>
-                  <TrendingUpIcon
-                    sx={{
-                      color: theme.palette.success.main,
-                      fontSize: 16,
-                      mr: 0.5,
-                    }}
-                  />
-                  <Typography variant="body2" color="success.main">
-                    +5% from yesterday
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+          <StatCard
+            icon={<TimelineRounded />}
+            label="Predicted Peak (24h)"
+            value={nextPeak !== null ? fmtKwh(nextPeak) : "—"}
+            hint="From forecasting model"
+            accent="#dc2626"
+            loading={loading}
+          />
         </Grid>
       </Grid>
 
-      {/* Charts */}
-      <Grid container spacing={3}>
-        {/* Energy Consumption Chart */}
+      <Grid container spacing={2.5}>
         <Grid item xs={12} md={8}>
-          {loading ? (
-            <ChartSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardHeader
-                title="Today's Energy Consumption"
-                subheader="Hourly consumption in kWh"
-                action={
-                  <IconButton aria-label="settings">
-                    <MoreVertIcon />
-                  </IconButton>
-                }
-              />
-              <Divider />
-              <CardContent>
-                <Box sx={{ height: 300 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={energyData}
-                      margin={{
-                        top: 10,
-                        right: 30,
-                        left: 0,
-                        bottom: 0,
-                      }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Area
-                        type="monotone"
-                        dataKey="consumption"
-                        stroke={theme.palette.primary.main}
-                        fill={theme.palette.primary.main}
-                        fillOpacity={0.2}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+          <Card sx={{ height: "100%" }}>
+            <CardHeader
+              title="Consumption this week"
+              subheader="Daily kWh totals from your logged readings"
+              action={
+                <Chip
+                  size="small"
+                  label="Live"
+                  sx={{
+                    backgroundColor: "rgba(5,150,105,0.1)",
+                    color: "primary.dark",
+                    fontWeight: 700,
+                  }}
+                />
+              }
+            />
+            <CardContent sx={{ pt: 0 }}>
+              {loading ? (
+                <Skeleton variant="rounded" height={280} />
+              ) : weekSeries.length === 0 ? (
+                <EmptyChartState onAdd={() => setDialogOpen(true)} />
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <AreaChart
+                    data={weekSeries}
+                    margin={{ top: 10, right: 10, left: -14, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient
+                        id="consumptionGradient"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="5%"
+                          stopColor="#10b981"
+                          stopOpacity={0.35}
+                        />
+                        <stop
+                          offset="95%"
+                          stopColor="#10b981"
+                          stopOpacity={0}
+                        />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F6" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 12 }}
+                      stroke="#94A3B8"
+                    />
+                    <YAxis tick={{ fontSize: 12 }} stroke="#94A3B8" />
+                    <ChartTooltip
+                      formatter={(value, name) => [
+                        name === "cost" ? fmtUsd(value) : fmtKwh(value),
+                        name,
+                      ]}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="consumption"
+                      stroke="#059669"
+                      strokeWidth={2.5}
+                      fill="url(#consumptionGradient)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Energy Sources Chart */}
         <Grid item xs={12} md={4}>
-          {loading ? (
-            <ChartSkeleton />
-          ) : (
-            <Card sx={{ height: "100%" }}>
-              <CardHeader
-                title="Energy Sources"
-                subheader="Distribution by source type"
-                action={
-                  <IconButton aria-label="settings">
-                    <MoreVertIcon />
-                  </IconButton>
-                }
-              />
-              <Divider />
-              <CardContent>
-                <Box
-                  sx={{
-                    height: 300,
-                    display: "flex",
-                    justifyContent: "center",
-                  }}
+          <Card sx={{ height: "100%" }}>
+            <CardHeader title="Quick actions" />
+            <CardContent sx={{ pt: 0 }}>
+              <Stack spacing={1.5}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => navigate("/dashboard/predictions")}
                 >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={sourceData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                        label={({ name, percent }) =>
-                          `${name} ${(percent * 100).toFixed(0)}%`
-                        }
-                      >
-                        {sourceData.map((_entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={COLORS[index % COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
+                  View forecasts
+                </Button>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => navigate("/dashboard/analytics")}
+                >
+                  Explore analytics
+                </Button>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => navigate("/dashboard/data")}
+                >
+                  Manage data records
+                </Button>
+                <Button
+                  variant="text"
+                  fullWidth
+                  onClick={() => setDialogOpen(true)}
+                >
+                  + Log a new reading
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card>
+            <CardHeader
+              title="Recent readings"
+              action={
+                <Button
+                  size="small"
+                  onClick={() => navigate("/dashboard/data")}
+                >
+                  View all
+                </Button>
+              }
+            />
+            <CardContent sx={{ pt: 0 }}>
+              {loading ? (
+                <Skeleton variant="rounded" height={180} />
+              ) : recentRecords.length === 0 ? (
+                <EmptyChartState onAdd={() => setDialogOpen(true)} />
+              ) : (
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Timestamp</TableCell>
+                        <TableCell align="right">Consumption</TableCell>
+                        <TableCell align="right">Generation</TableCell>
+                        <TableCell align="right">Cost</TableCell>
+                        <TableCell align="right">Temp.</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {recentRecords.map((r) => (
+                        <TableRow key={r.id} hover>
+                          <TableCell>
+                            {new Date(r.timestamp).toLocaleString()}
+                          </TableCell>
+                          <TableCell align="right">
+                            {fmtKwh(r.consumption_kwh)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {r.generation_kwh != null
+                              ? fmtKwh(r.generation_kwh)
+                              : "—"}
+                          </TableCell>
+                          <TableCell align="right">
+                            {r.cost_usd != null ? fmtUsd(r.cost_usd) : "—"}
+                          </TableCell>
+                          <TableCell align="right">
+                            {r.temperature_c != null
+                              ? `${r.temperature_c}°C`
+                              : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
+
+      <DataRecordDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSubmit={handleAddRecord}
+        submitting={submitting}
+        errorMessage={dialogError}
+      />
     </Box>
   );
 };
+
+const EmptyChartState = ({ onAdd }) => (
+  <Stack
+    spacing={1.5}
+    alignItems="center"
+    justifyContent="center"
+    sx={{ py: 6 }}
+  >
+    <Typography variant="body2" color="text.secondary" textAlign="center">
+      No readings yet. Log your first one to see it here.
+    </Typography>
+    <Button size="small" variant="outlined" onClick={onAdd}>
+      Log a reading
+    </Button>
+  </Stack>
+);
 
 export default Dashboard;

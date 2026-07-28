@@ -1,49 +1,91 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
-import { API_CONFIG } from "../constants/config";
+import { API_BASE_URL, API_TIMEOUT, STORAGE_KEYS } from "../constants/config";
 
-// Create axios instance with configuration
+// ---------------------------------------------------------------------------
+// Token storage helpers
+// ---------------------------------------------------------------------------
+export const getAccessToken = () =>
+  AsyncStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+export const getRefreshToken = () =>
+  AsyncStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+
+export const setTokens = async ({ access_token, refresh_token }) => {
+  const entries = [];
+  if (access_token) entries.push([STORAGE_KEYS.ACCESS_TOKEN, access_token]);
+  if (refresh_token) entries.push([STORAGE_KEYS.REFRESH_TOKEN, refresh_token]);
+  if (entries.length) await AsyncStorage.multiSet(entries);
+};
+
+export const clearTokens = async () => {
+  await AsyncStorage.multiRemove([
+    STORAGE_KEYS.ACCESS_TOKEN,
+    STORAGE_KEYS.REFRESH_TOKEN,
+  ]);
+};
+
+// ---------------------------------------------------------------------------
+// Axios instance
+// ---------------------------------------------------------------------------
 const apiClient = axios.create({
-  baseURL: API_CONFIG.BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  timeout: API_CONFIG.TIMEOUT,
+  baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT,
+  headers: { "Content-Type": "application/json" },
 });
 
-// Request interceptor for adding auth token
-apiClient.interceptors.request.use(
-  (config) => {
-    // In a real app, get token from AsyncStorage or auth context
-    // const token = await AsyncStorage.getItem('token');
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`;
-    // }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
+apiClient.interceptors.request.use(async (config) => {
+  if (!config.headers?.["X-Skip-Auth"]) {
+    const token = await getAccessToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
 
-// Response interceptor for error handling
+let onForcedLogout = null;
+export const registerForcedLogoutHandler = (handler) => {
+  onForcedLogout = handler;
+};
+
+let refreshPromise = null;
+
+const performRefresh = async () => {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) throw new Error("No refresh token available");
+  const response = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, {
+    refresh_token: refreshToken,
+  });
+  await setTokens(response.data);
+  return response.data;
+};
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    console.error("API call error:", error.response || error.message || error);
+  async (error) => {
+    const originalRequest = error.config;
+    const status = error.response?.status;
+    const isAuthEndpoint =
+      originalRequest?.url?.includes("/v1/auth/token") ||
+      originalRequest?.url?.includes("/v1/auth/refresh") ||
+      originalRequest?.url?.includes("/v1/auth/register");
 
-    // Handle specific error codes
-    if (error.response) {
-      switch (error.response.status) {
-        case 401:
-          // Handle unauthorized - maybe navigate to login
-          console.warn("Unauthorized - Please login again");
-          break;
-        case 404:
-          console.warn("Resource not found");
-          break;
-        case 500:
-          console.error("Server error");
-          break;
+    if (status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+      const refreshToken = await getRefreshToken();
+      if (refreshToken) {
+        originalRequest._retry = true;
+        try {
+          refreshPromise = refreshPromise || performRefresh();
+          const tokens = await refreshPromise;
+          refreshPromise = null;
+          originalRequest.headers.Authorization = `Bearer ${tokens.access_token}`;
+          return apiClient(originalRequest);
+        } catch (refreshError) {
+          refreshPromise = null;
+          await clearTokens();
+          if (onForcedLogout) onForcedLogout();
+          return Promise.reject(refreshError);
+        }
       }
     }
 
@@ -51,161 +93,135 @@ apiClient.interceptors.response.use(
   },
 );
 
-/**
- * Health check endpoint
- * @returns {Promise<{status: string}>}
- */
-export const getHealth = async () => {
-  try {
-    const response = await apiClient.get("/health");
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching health status:", error);
-    throw new Error("Failed to fetch health status from backend.");
-  }
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+export const loginRequest = async (email, password) => {
+  const form = new URLSearchParams();
+  form.append("username", email);
+  form.append("password", password);
+  const response = await apiClient.post("/v1/auth/token", form.toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  return response.data;
 };
 
-/**
- * Get predictions from the backend
- * @param {Object} payload - Prediction request payload
- * @returns {Promise<{predictions: number[], confidence_intervals: Array<[number, number]>, model_version: string}>}
- */
-export const postPredictions = async (payload) => {
-  try {
-    const response = await apiClient.post("/predict", payload);
-    return response.data;
-  } catch (error) {
-    console.error("Error posting predictions:", error);
-
-    if (error.response?.data?.detail) {
-      throw new Error(
-        `Prediction failed: ${JSON.stringify(error.response.data.detail)}`,
-      );
-    }
-    throw new Error("Failed to get predictions from backend.");
-  }
+export const registerRequest = async (email, password) => {
+  const response = await apiClient.post("/v1/auth/register", {
+    email,
+    password,
+  });
+  return response.data;
 };
 
-/**
- * Get summary statistics
- * @returns {Promise<{totalPredictions: number, averageAccuracy: number, lastPredictionTime: string}>}
- */
-export const getSummary = async () => {
-  try {
-    const response = await apiClient.get("/summary");
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching summary data:", error);
-
-    // Return mock data when endpoint is not available
-    console.warn(
-      "Using fallback summary data - /summary endpoint not available",
-    );
-    return {
-      totalPredictions: 125,
-      averageAccuracy: 0.92,
-      lastPredictionTime: new Date().toLocaleTimeString(),
-    };
-  }
+export const fetchCurrentUser = async () => {
+  const response = await apiClient.get("/v1/auth/me");
+  return response.data;
 };
 
-/**
- * Get historical energy data
- * @param {Object} params - Query parameters (e.g., { start_date, end_date, meter_id })
- * @returns {Promise<{lineData: Object, barData: Object}>}
- */
-export const getHistoricalData = async (params) => {
-  try {
-    const response = await apiClient.get("/historical_data", { params });
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching historical data:", error);
-
-    // Return mock data when endpoint is not available
-    console.warn(
-      "Using fallback historical data - /historical_data endpoint not available",
-    );
-
-    return {
-      lineData: {
-        labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        datasets: [{ data: [25, 40, 30, 55, 45, 60] }],
-      },
-      barData: {
-        labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        datasets: [{ data: [30, 50, 35, 70, 90, 50, 60] }],
-      },
-    };
-  }
+export const updateCurrentUser = async (payload) => {
+  const response = await apiClient.patch("/v1/auth/me", payload);
+  return response.data;
 };
 
-/**
- * Get model performance metrics
- * @returns {Promise<{mae: number, rmse: number, r2_score: number}>}
- */
-export const getModelMetrics = async () => {
-  try {
-    const response = await apiClient.get("/metrics");
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching model metrics:", error);
-
-    // Return mock data when endpoint is not available
-    console.warn(
-      "Using fallback metrics data - /metrics endpoint not available",
-    );
-
-    return {
-      mae: 0.15,
-      rmse: 0.22,
-      r2_score: 0.89,
-    };
-  }
+export const deleteCurrentUser = async () => {
+  await apiClient.delete("/v1/auth/me");
+  return true;
 };
 
-/**
- * Get user profile
- * @param {string} userId - User ID
- * @returns {Promise<Object>}
- */
-export const getUserProfile = async (userId) => {
-  try {
-    const response = await apiClient.get(`/users/${userId}`);
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching user profile:", error);
-    throw new Error("Failed to fetch user profile.");
-  }
+// ---------------------------------------------------------------------------
+// Admin: user management (superuser only)
+// ---------------------------------------------------------------------------
+export const getUsers = async ({ skip = 0, limit = 100 } = {}) => {
+  const response = await apiClient.get("/v1/users/", {
+    params: { skip, limit },
+  });
+  return response.data;
 };
 
-/**
- * Update user profile
- * @param {string} userId - User ID
- * @param {Object} data - Profile data to update
- * @returns {Promise<Object>}
- */
-export const updateUserProfile = async (userId, data) => {
-  try {
-    const response = await apiClient.put(`/users/${userId}`, data);
-    return response.data;
-  } catch (error) {
-    console.error("Error updating user profile:", error);
-    throw new Error("Failed to update user profile.");
-  }
+export const updateUserById = async (id, payload) => {
+  const response = await apiClient.patch(`/v1/users/${id}`, payload);
+  return response.data;
 };
 
-/**
- * Get notifications
- * @returns {Promise<Array>}
- */
-export const getNotifications = async () => {
-  try {
-    const response = await apiClient.get("/notifications");
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching notifications:", error);
-    return []; // Return empty array on error
-  }
+export const deleteUserById = async (id) => {
+  await apiClient.delete(`/v1/users/${id}`);
+  return true;
+};
+
+export const activateUserById = async (id) => {
+  const response = await apiClient.post(`/v1/users/${id}/activate`);
+  return response.data;
+};
+
+export const deactivateUserById = async (id) => {
+  const response = await apiClient.post(`/v1/users/${id}/deactivate`);
+  return response.data;
+};
+
+// ---------------------------------------------------------------------------
+// Energy data records (CRUD)
+// ---------------------------------------------------------------------------
+export const getDataRecords = async ({ skip = 0, limit = 100 } = {}) => {
+  const response = await apiClient.get("/v1/data/", {
+    params: { skip, limit },
+  });
+  return response.data;
+};
+
+export const createDataRecord = async (payload) => {
+  const response = await apiClient.post("/v1/data/", payload);
+  return response.data;
+};
+
+export const updateDataRecord = async (id, payload) => {
+  const response = await apiClient.patch(`/v1/data/${id}`, payload);
+  return response.data;
+};
+
+export const deleteDataRecord = async (id) => {
+  await apiClient.delete(`/v1/data/${id}`);
+  return true;
+};
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+export const getAnalytics = async (period = "month") => {
+  const response = await apiClient.get("/v1/analytics/", {
+    params: { period },
+  });
+  return response.data;
+};
+
+export const getAnalyticsSummary = async () => {
+  const response = await apiClient.get("/v1/analytics/summary");
+  return response.data;
+};
+
+// ---------------------------------------------------------------------------
+// Predictions
+// ---------------------------------------------------------------------------
+export const getPredictions = async (days = 7) => {
+  const response = await apiClient.get("/v1/predictions/", {
+    params: { days },
+  });
+  return response.data;
+};
+
+export const triggerTraining = async () => {
+  const response = await apiClient.post("/v1/predictions/train");
+  return response.data;
+};
+
+// ---------------------------------------------------------------------------
+// System
+// ---------------------------------------------------------------------------
+export const getHealthStatus = async () => {
+  const response = await apiClient.get("/health", {
+    headers: { "X-Skip-Auth": "1" },
+  });
+  return response.data;
 };
 
 export default apiClient;

@@ -1,13 +1,15 @@
 #!/bin/bash
 
-# install_dependencies.sh
-# Automates the installation of all dependencies for Fluxora components
-#
-# This script installs dependencies for:
-# - Backend (Python)
+# setup_environment.sh (a.k.a. the dependency installer)
+# Installs dependencies for all Fluxora components:
+# - Backend + ml_core (Python, via a venv in code/backend/venv)
 # - Web Frontend (Node.js)
-# - Mobile Frontend (React Native)
-# - Monitoring tools
+# - Mobile Frontend (React Native / Expo)
+#
+# Defaults to the actual Fluxora repository root (resolved relative to this
+# script's own location) so it works whether you run it as
+# `./setup_environment.sh` from inside scripts/, or `./scripts/setup_environment.sh`
+# from the repo root. Use -d/--directory to point at a different checkout.
 
 set -euo pipefail
 
@@ -19,8 +21,8 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
-# Default project directory
-PROJECT_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Function to print section headers
 print_section() {
@@ -55,12 +57,18 @@ check_directory() {
 install_backend_deps() {
     print_section "Installing Backend Dependencies"
 
-    if ! check_directory "${PROJECT_DIR}/src"; then
-        print_warning "Backend source directory not found, skipping..."
-        return
+    local backend_dir="${PROJECT_DIR}/code/backend"
+    if ! check_directory "$backend_dir"; then
+        print_warning "Backend directory (code/backend) not found, skipping..."
+        return 0
     fi
 
-    cd "${PROJECT_DIR}/src"
+    if ! command -v python3 &> /dev/null; then
+        print_error "Python 3 is not installed. Please install it before continuing."
+        return 1
+    fi
+
+    cd "$backend_dir"
 
     # Check if virtualenv exists, create if not
     if [ ! -d "venv" ]; then
@@ -68,32 +76,26 @@ install_backend_deps() {
         python3 -m venv venv
     fi
 
-    # Activate virtual environment
-    print_warning "Activating virtual environment..."
-    source venv/bin/activate
-
     # Upgrade pip
     print_warning "Upgrading pip..."
-    pip install --upgrade pip
+    ./venv/bin/pip install --upgrade pip
 
     # Install requirements
     if [ -f "requirements.txt" ]; then
         print_warning "Installing Python dependencies from requirements.txt..."
-        pip install -r requirements.txt
+        ./venv/bin/pip install -r requirements.txt
     else
-        print_error "requirements.txt not found in ${PROJECT_DIR}/src"
+        print_error "requirements.txt not found in ${backend_dir}"
+        return 1
     fi
 
     # Install development requirements if available
     if [ -f "requirements-dev.txt" ]; then
         print_warning "Installing development dependencies..."
-        pip install -r requirements-dev.txt
+        ./venv/bin/pip install -r requirements-dev.txt
     fi
 
-    # Deactivate virtual environment
-    deactivate
-
-    print_success "Backend dependencies installed successfully"
+    print_success "Backend dependencies installed successfully (venv at ${backend_dir}/venv)"
 }
 
 # Function to install web frontend dependencies
@@ -102,15 +104,15 @@ install_web_frontend_deps() {
 
     if ! check_directory "${PROJECT_DIR}/web-frontend"; then
         print_warning "Web frontend directory not found, skipping..."
-        return
+        return 0
     fi
 
     cd "${PROJECT_DIR}/web-frontend"
 
     # Check if Node.js is installed
     if ! command -v node &> /dev/null; then
-        print_error "Node.js is not installed. Please run setup_environment.sh first."
-        return
+        print_error "Node.js is not installed. Please install Node.js 18+ before continuing."
+        return 1
     fi
 
     # Install dependencies
@@ -119,6 +121,7 @@ install_web_frontend_deps() {
         npm install
     else
         print_error "package.json not found in ${PROJECT_DIR}/web-frontend"
+        return 1
     fi
 
     print_success "Web frontend dependencies installed successfully"
@@ -130,15 +133,15 @@ install_mobile_frontend_deps() {
 
     if ! check_directory "${PROJECT_DIR}/mobile-frontend"; then
         print_warning "Mobile frontend directory not found, skipping..."
-        return
+        return 0
     fi
 
     cd "${PROJECT_DIR}/mobile-frontend"
 
     # Check if Node.js is installed
     if ! command -v node &> /dev/null; then
-        print_error "Node.js is not installed. Please run setup_environment.sh first."
-        return
+        print_error "Node.js is not installed. Please install Node.js 18+ before continuing."
+        return 1
     fi
 
     # Install dependencies
@@ -147,55 +150,34 @@ install_mobile_frontend_deps() {
         npm install
     else
         print_error "package.json not found in ${PROJECT_DIR}/mobile-frontend"
+        return 1
     fi
 
-    # Check if React Native CLI is installed
-    if ! command -v npx react-native &> /dev/null; then
-        print_warning "Installing React Native CLI..."
-        npm install -g react-native-cli
-    fi
-
+    # This is an Expo-managed project (see package.json's "expo" scripts) --
+    # `npx expo` is used on demand by start_services.sh and doesn't need a
+    # separate global CLI install, unlike bare React Native CLI projects.
     print_success "Mobile frontend dependencies installed successfully"
-}
-
-# Function to install monitoring dependencies
-install_monitoring_deps() {
-    print_section "Installing Monitoring Dependencies"
-
-    if ! check_directory "${PROJECT_DIR}/monitoring"; then
-        print_warning "Monitoring directory not found, skipping..."
-        return
-    fi
-
-    cd "${PROJECT_DIR}/monitoring"
-
-    # Check if Docker is installed
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed. Please run setup_environment.sh first."
-        return
-    fi
-
-    print_warning "Monitoring dependencies will be handled by Docker"
-    print_warning "Use docker_manager.sh to build and start monitoring services"
-
-    print_success "Monitoring setup completed"
 }
 
 # Function to install all dependencies
 install_all_deps() {
     print_section "Installing All Dependencies"
 
-    install_backend_deps
-    install_web_frontend_deps
-    install_mobile_frontend_deps
-    install_monitoring_deps
+    local had_failure=false
+    install_backend_deps || had_failure=true
+    install_web_frontend_deps || had_failure=true
+    install_mobile_frontend_deps || had_failure=true
 
     print_section "Dependency Installation Complete"
-    print_success "All dependencies have been installed successfully"
+    if [ "$had_failure" = true ]; then
+        print_warning "One or more components were skipped or failed -- see messages above."
+    else
+        print_success "All dependencies have been installed successfully"
+    fi
 
     echo -e "\nNext steps:"
-    echo "1. Run the start_services.sh script to start all required services"
-    echo "2. Access the application at http://localhost:8000"
+    echo "1. Run ./start_services.sh to start all required services"
+    echo "2. Access the API at http://localhost:8000 and the web app at http://localhost:3000"
 }
 
 # Function to display help message
@@ -205,15 +187,14 @@ show_help() {
     echo "Usage: $0 [options] [component]"
     echo ""
     echo "Components:"
-    echo "  backend            Install backend dependencies"
+    echo "  backend            Install backend + ml_core dependencies (Python venv)"
     echo "  web                Install web frontend dependencies"
     echo "  mobile             Install mobile frontend dependencies"
-    echo "  monitoring         Install monitoring dependencies"
     echo "  all                Install all dependencies (default)"
     echo ""
     echo "Options:"
     echo "  -h, --help         Show this help message"
-    echo "  -d, --directory    Specify Fluxora project directory (default: current directory)"
+    echo "  -d, --directory    Specify Fluxora project directory (default: repo root, auto-detected)"
     echo ""
     echo "Examples:"
     echo "  $0                           # Install all dependencies"
@@ -234,7 +215,7 @@ while [[ $# -gt 0 ]]; do
             PROJECT_DIR="$2"
             shift 2
             ;;
-        backend|web|mobile|monitoring|all)
+        backend|web|mobile|all)
             COMPONENT="$1"
             shift
             ;;
@@ -262,9 +243,6 @@ case $COMPONENT in
         ;;
     mobile)
         install_mobile_frontend_deps
-        ;;
-    monitoring)
-        install_monitoring_deps
         ;;
     all)
         install_all_deps

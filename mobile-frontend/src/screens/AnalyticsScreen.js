@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   Dimensions,
   RefreshControl,
@@ -6,357 +7,195 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { BarChart, LineChart } from "react-native-chart-kit";
 import {
-  ActivityIndicator,
-  Appbar,
   Card,
   DataTable,
-  Paragraph,
+  SegmentedButtons,
   Text,
   Title,
-  useTheme,
 } from "react-native-paper";
-import { getHistoricalData, getModelMetrics } from "../api/api";
+import { BarChart } from "react-native-chart-kit";
+import StatCard from "../components/StatCard";
+import { getAnalytics } from "../api/api";
+import { colors, fontSize, shadows, spacing } from "../styles/theme";
 
 const screenWidth = Dimensions.get("window").width;
 
-const AnalyticsScreen = ({ navigation }) => {
-  const theme = useTheme();
+const fmtKwh = (n) =>
+  `${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh`;
+const fmtUsd = (n) =>
+  `$${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
+export default function AnalyticsScreen() {
+  const [period, setPeriod] = useState("month");
+  const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(null);
-  const [historicalData, setHistoricalData] = useState(null);
-  const [metrics, setMetrics] = useState(null);
 
-  const fetchData = async () => {
+  const load = useCallback(async (p) => {
     try {
-      setLoading(true);
-      setError(null);
-
-      const [data, metricsData] = await Promise.all([
-        getHistoricalData(),
-        getModelMetrics(),
-      ]);
-
-      setHistoricalData(data);
-      setMetrics(metricsData);
+      const res = await getAnalytics(p);
+      setData(res || []);
     } catch (err) {
-      console.error("Failed to load analytics data:", err);
-      setError("Failed to load analytics data. Please try again.");
+      console.error("Failed to load analytics", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      load(period);
+    }, [load, period]),
+  );
 
-  const onRefresh = () => {
+  const handleRefresh = () => {
     setRefreshing(true);
-    fetchData();
+    load(period);
   };
 
-  const chartConfig = {
-    backgroundColor: theme.colors.surface,
-    backgroundGradientFrom: theme.colors.surface,
-    backgroundGradientTo: theme.colors.backdrop,
-    decimalPlaces: 2,
-    color: (opacity = 1) =>
-      `rgba(${theme.dark ? "255, 255, 255" : "0, 0, 0"}, ${opacity})`,
-    labelColor: (opacity = 1) =>
-      `rgba(${theme.dark ? "255, 255, 255" : "0, 0, 0"}, ${opacity})`,
-    style: {
-      borderRadius: 16,
-    },
-    propsForDots: {
-      r: "6",
-      strokeWidth: "2",
-      stroke: theme.colors.primary,
-    },
-  };
+  const totals = data.reduce(
+    (acc, d) => ({
+      consumption: acc.consumption + (d.consumption || 0),
+      cost: acc.cost + (d.cost || 0),
+      efficiencySum: acc.efficiencySum + (d.efficiency || 0),
+    }),
+    { consumption: 0, cost: 0, efficiencySum: 0 },
+  );
+  const avgEfficiency = data.length ? totals.efficiencySum / data.length : 0;
 
-  if (loading && !refreshing) {
-    return (
-      <View style={styles.container}>
-        <Appbar.Header>
-          <Appbar.Content title="Analytics" />
-        </Appbar.Header>
-        <View style={styles.centerContent}>
-          <ActivityIndicator
-            animating={true}
-            size="large"
-            color={theme.colors.primary}
-          />
-          <Text style={styles.loadingText}>Loading analytics...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (error && !historicalData) {
-    return (
-      <View style={styles.container}>
-        <Appbar.Header>
-          <Appbar.Content title="Analytics" />
-        </Appbar.Header>
-        <View style={styles.centerContent}>
-          <Card style={styles.card}>
-            <Card.Content>
-              <Paragraph style={styles.errorText}>{error}</Paragraph>
-            </Card.Content>
-          </Card>
-        </View>
-      </View>
-    );
-  }
+  const chartLabels = data.map((d) => (d.label || "").slice(0, 3));
+  const chartValues = data.map((d) => d.consumption || 0);
 
   return (
-    <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.Content title="Analytics" />
-      </Appbar.Header>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          colors={[colors.primary]}
+        />
+      }
+    >
+      <Text style={styles.heading}>Analytics</Text>
+      <Text style={styles.subheading}>
+        Consumption, cost and efficiency rollups.
+      </Text>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {/* Energy Consumption Trend */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title>Energy Consumption Trend (Monthly)</Title>
-            <Paragraph style={styles.subtitle}>
-              Historical consumption patterns over the last 6 months
-            </Paragraph>
-            {historicalData?.lineData && (
-              <LineChart
-                data={historicalData.lineData}
-                width={screenWidth - 60}
-                height={220}
-                chartConfig={chartConfig}
-                bezier
-                style={styles.chart}
-              />
-            )}
-          </Card.Content>
-        </Card>
+      <SegmentedButtons
+        value={period}
+        onValueChange={setPeriod}
+        style={styles.segmented}
+        buttons={[
+          { value: "week", label: "Week" },
+          { value: "month", label: "Month" },
+          { value: "year", label: "Year" },
+        ]}
+      />
 
-        {/* Peak Usage Times */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title>Peak Usage Times (Weekly)</Title>
-            <Paragraph style={styles.subtitle}>
-              Peak energy consumption by day of week
-            </Paragraph>
-            {historicalData?.barData && (
-              <BarChart
-                data={historicalData.barData}
-                width={screenWidth - 60}
-                height={220}
-                yAxisLabel="kWh "
-                chartConfig={chartConfig}
-                verticalLabelRotation={30}
-                style={styles.chart}
-              />
-            )}
-          </Card.Content>
-        </Card>
+      <View style={styles.statsRow}>
+        <StatCard
+          icon="lightning-bolt"
+          label="Consumption"
+          value={fmtKwh(totals.consumption)}
+          accent={colors.primary}
+          style={styles.statCardHalf}
+        />
+        <StatCard
+          icon="cash"
+          label="Cost"
+          value={fmtUsd(totals.cost)}
+          accent={colors.secondary}
+          style={styles.statCardHalf}
+        />
+      </View>
+      <View style={styles.statsRow}>
+        <StatCard
+          icon="speedometer"
+          label="Avg Efficiency"
+          value={`${avgEfficiency.toFixed(1)}%`}
+          accent={colors.warning}
+          style={styles.statCardHalf}
+        />
+      </View>
 
-        {/* Model Performance Metrics */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title>Model Performance Metrics</Title>
-            <Paragraph style={styles.subtitle}>
-              Current prediction model accuracy indicators
-            </Paragraph>
+      <Card style={[styles.card, shadows.small]}>
+        <Card.Content>
+          <Title style={styles.cardTitle}>Consumption by {period}</Title>
+          {chartValues.length > 0 ? (
+            <BarChart
+              data={{ labels: chartLabels, datasets: [{ data: chartValues }] }}
+              width={screenWidth - spacing.lg * 2 - 32}
+              height={220}
+              fromZero
+              showValuesOnTopOfBars
+              chartConfig={{
+                backgroundGradientFrom: colors.surface,
+                backgroundGradientTo: colors.surface,
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
+                labelColor: () => colors.textSecondary,
+              }}
+              style={{ marginLeft: -spacing.lg, borderRadius: 12 }}
+            />
+          ) : (
+            <Text style={styles.emptyText}>
+              {loading ? "Loading…" : "No analytics data for this period."}
+            </Text>
+          )}
+        </Card.Content>
+      </Card>
 
-            {metrics ? (
-              <DataTable>
-                <DataTable.Header>
-                  <DataTable.Title>Metric</DataTable.Title>
-                  <DataTable.Title numeric>Value</DataTable.Title>
-                  <DataTable.Title numeric>Status</DataTable.Title>
-                </DataTable.Header>
-
-                <DataTable.Row>
-                  <DataTable.Cell>Mean Absolute Error (MAE)</DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    {metrics.mae?.toFixed(4)}
-                  </DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    <Text
-                      style={{ color: metrics.mae < 0.2 ? "green" : "orange" }}
-                    >
-                      {metrics.mae < 0.2 ? "Good" : "Fair"}
-                    </Text>
-                  </DataTable.Cell>
-                </DataTable.Row>
-
-                <DataTable.Row>
-                  <DataTable.Cell>Root Mean Square Error (RMSE)</DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    {metrics.rmse?.toFixed(4)}
-                  </DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    <Text
-                      style={{
-                        color: metrics.rmse < 0.25 ? "green" : "orange",
-                      }}
-                    >
-                      {metrics.rmse < 0.25 ? "Good" : "Fair"}
-                    </Text>
-                  </DataTable.Cell>
-                </DataTable.Row>
-
-                <DataTable.Row>
-                  <DataTable.Cell>R² Score</DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    {metrics.r2_score?.toFixed(4)}
-                  </DataTable.Cell>
-                  <DataTable.Cell numeric>
-                    <Text
-                      style={{
-                        color: metrics.r2_score > 0.85 ? "green" : "orange",
-                      }}
-                    >
-                      {metrics.r2_score > 0.85 ? "Excellent" : "Good"}
-                    </Text>
-                  </DataTable.Cell>
-                </DataTable.Row>
-              </DataTable>
-            ) : (
-              <Paragraph style={styles.placeholderText}>
-                Metrics data not available
-              </Paragraph>
-            )}
-
-            <View style={styles.metricsInfo}>
-              <Paragraph style={styles.infoText}>
-                <Text style={styles.bold}>MAE:</Text> Average absolute
-                difference between predictions and actual values
-              </Paragraph>
-              <Paragraph style={styles.infoText}>
-                <Text style={styles.bold}>RMSE:</Text> Square root of average
-                squared differences
-              </Paragraph>
-              <Paragraph style={styles.infoText}>
-                <Text style={styles.bold}>R² Score:</Text> Proportion of
-                variance explained by the model (0-1)
-              </Paragraph>
-            </View>
-          </Card.Content>
-        </Card>
-
-        {/* Energy Insights */}
-        <Card style={styles.card}>
-          <Card.Content>
-            <Title>Energy Insights</Title>
-            <View style={styles.insightItem}>
-              <Text style={styles.insightLabel}>🔋 Average Daily Usage:</Text>
-              <Text style={styles.insightValue}>42.5 kWh</Text>
-            </View>
-            <View style={styles.insightItem}>
-              <Text style={styles.insightLabel}>📊 Weekly Trend:</Text>
-              <Text style={[styles.insightValue, { color: "green" }]}>
-                ↓ 5.2% decrease
-              </Text>
-            </View>
-            <View style={styles.insightItem}>
-              <Text style={styles.insightLabel}>⚡ Peak Hour:</Text>
-              <Text style={styles.insightValue}>18:00 - 20:00</Text>
-            </View>
-            <View style={styles.insightItem}>
-              <Text style={styles.insightLabel}>💰 Estimated Savings:</Text>
-              <Text style={[styles.insightValue, { color: "green" }]}>
-                $24.50/month
-              </Text>
-            </View>
-          </Card.Content>
-        </Card>
-      </ScrollView>
-    </View>
+      <Card style={[styles.card, shadows.small, { marginBottom: spacing.xxl }]}>
+        <Card.Content>
+          <Title style={styles.cardTitle}>Breakdown</Title>
+          <DataTable>
+            <DataTable.Header>
+              <DataTable.Title>Period</DataTable.Title>
+              <DataTable.Title numeric>kWh</DataTable.Title>
+              <DataTable.Title numeric>Cost</DataTable.Title>
+              <DataTable.Title numeric>Eff.</DataTable.Title>
+            </DataTable.Header>
+            {data.map((row) => (
+              <DataTable.Row key={row.label}>
+                <DataTable.Cell>{row.label}</DataTable.Cell>
+                <DataTable.Cell numeric>
+                  {Number(row.consumption).toFixed(0)}
+                </DataTable.Cell>
+                <DataTable.Cell numeric>
+                  ${Number(row.cost).toFixed(0)}
+                </DataTable.Cell>
+                <DataTable.Cell numeric>{row.efficiency}%</DataTable.Cell>
+              </DataTable.Row>
+            ))}
+          </DataTable>
+        </Card.Content>
+      </Card>
+    </ScrollView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
+  root: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { padding: spacing.lg },
+  heading: { fontSize: fontSize.xl, fontWeight: "800" },
+  subheading: {
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.md,
   },
-  content: {
-    flex: 1,
-    padding: 15,
-  },
-  centerContent: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  card: {
-    marginBottom: 15,
-    elevation: 3,
-  },
-  chart: {
-    marginVertical: 8,
-    borderRadius: 16,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 10,
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: "#666",
-  },
-  errorText: {
-    color: "red",
+  segmented: { marginBottom: spacing.md },
+  statsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
+  statCardHalf: { flex: 1 },
+  card: { borderRadius: 16, marginTop: spacing.sm, marginBottom: spacing.md },
+  cardTitle: { fontSize: fontSize.md, marginBottom: spacing.sm },
+  emptyText: {
+    color: colors.textMuted,
     textAlign: "center",
-    fontSize: 16,
-  },
-  placeholderText: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginTop: 10,
-    fontStyle: "italic",
-  },
-  metricsInfo: {
-    marginTop: 15,
-    padding: 10,
-    backgroundColor: "#f9f9f9",
-    borderRadius: 8,
-  },
-  infoText: {
-    fontSize: 12,
-    color: "#555",
-    marginBottom: 5,
-  },
-  bold: {
-    fontWeight: "bold",
-  },
-  insightItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-  },
-  insightLabel: {
-    fontSize: 14,
-    color: "#555",
-  },
-  insightValue: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#333",
+    paddingVertical: spacing.lg,
   },
 });
-
-export default AnalyticsScreen;

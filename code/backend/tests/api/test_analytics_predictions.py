@@ -52,6 +52,22 @@ def test_analytics_mock_data_shape(client: TestClient, auth_headers: dict):
     assert "efficiency" in first
 
 
+def test_analytics_mock_data_respects_period(client: TestClient, auth_headers: dict):
+    """Regression test: the mock fallback must reflect the requested period
+    instead of always returning the same static 3-point/day-labelled series
+    regardless of period."""
+    week = client.get("/v1/analytics/?period=week", headers=auth_headers).json()
+    month = client.get("/v1/analytics/?period=month", headers=auth_headers).json()
+    year = client.get("/v1/analytics/?period=year", headers=auth_headers).json()
+
+    assert len(week) == 7
+    assert len(month) == 30
+    assert len(year) == 52
+    # Year labels are week-based ("Week N"), not day-based.
+    assert all(label["label"].startswith("Week ") for label in year)
+    assert all(not label["label"].startswith("Week ") for label in week)
+
+
 def test_get_analytics_summary(client: TestClient, auth_headers: dict):
     response = client.get("/v1/analytics/summary", headers=auth_headers)
     assert response.status_code == 200
@@ -206,3 +222,59 @@ def test_train_returns_metrics_fields(client: TestClient, superuser_auth_headers
     assert "feature_count" in metrics
     assert "training_samples" in metrics
     assert "test_samples" in metrics
+
+
+def test_predictions_use_model_not_flat_fallback_with_sufficient_history(
+    client: TestClient, superuser_auth_headers: dict
+):
+    """Regression test for two compounding bugs that previously made the
+    prediction endpoint always fall back to a flat historical-mean value:
+
+    1. Only the 48 most recent readings were fetched as model context, far
+       fewer than the largest rolling window (168 hours) the model was
+       trained on, so the engineered features were always NaN.
+    2. Rolling features included each row's own (for a future row, unknown)
+       target value, so they were NaN for the row being predicted no
+       matter how much history existed.
+
+    With enough seeded history and a trained model, predictions should now
+    show real variation instead of 168 identical values.
+    """
+    import math
+    import random
+    from datetime import datetime, timedelta, timezone
+
+    rng = random.Random(42)
+    start = datetime.now(timezone.utc) - timedelta(days=45)
+    for i in range(45 * 24):
+        ts = start + timedelta(hours=i)
+        consumption = max(
+            50 + 20 * math.sin(ts.hour / 24 * 2 * math.pi) + rng.gauss(0, 3), 0.0
+        )
+        resp = client.post(
+            "/v1/data/",
+            headers=superuser_auth_headers,
+            json={
+                "consumption_kwh": round(consumption, 3),
+                "timestamp": ts.isoformat(),
+            },
+        )
+        assert resp.status_code == 201
+
+    train_resp = client.post("/v1/predictions/train", headers=superuser_auth_headers)
+    assert train_resp.status_code == 200
+
+    pred_resp = client.get("/v1/predictions/?days=7", headers=superuser_auth_headers)
+    assert pred_resp.status_code == 200
+    values = [p["predicted_consumption"] for p in pred_resp.json()]
+    assert len(values) == 7 * 24
+    distinct_values = len(set(round(v, 2) for v in values))
+    # The bug this guards against always produced EXACTLY 1 distinct value
+    # (every hour fell back to the same historical mean). A working model,
+    # even a tree ensemble that discretizes into a limited number of leaf
+    # outputs, comfortably clears a much higher bar than that once fed
+    # noisy, realistic data.
+    assert distinct_values > 10, (
+        "Predictions look like a flat fallback series "
+        f"(only {distinct_values} distinct values across {len(values)} hours)"
+    )

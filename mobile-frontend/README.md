@@ -1,339 +1,115 @@
-# Fluxora Mobile Frontend
+# Mobile Frontend — Fluxora
 
-## Overview
-
-The Fluxora Mobile Frontend is a React Native application built with Expo that provides mobile access to the Fluxora energy forecasting and optimization platform.
+The React Native (Expo) client for Fluxora, an energy intelligence platform. It mirrors
+the web app: a public welcome screen, email/password authentication, and a protected
+drawer app — all fully wired to the FastAPI backend in `code/backend`.
 
 ## Features
 
-- ✅ Real-time energy consumption dashboard
-- ✅ Energy prediction interface
-- ✅ Analytics and visualizations
-- ✅ User settings and preferences
-- ✅ Offline support with AsyncStorage
-- ✅ Authentication and user management
-- ✅ Push notifications (configurable)
+- Public welcome screen with a live backend status indicator
+- Sign in / sign up backed by real JWT auth (access + refresh tokens in AsyncStorage,
+  with automatic silent refresh and forced logout on expiry)
+- Protected drawer app: Dashboard, Predictions, Analytics, Data Records (full CRUD),
+  Settings
+- Shared design language with the web app (emerald primary `#059669`, blue accent
+  `#3b82f6`, `react-native-paper` MD3 theme)
 
-## Tech Stack
+## Tech stack
 
 - **Framework**: React Native with Expo SDK 52
-- **UI Library**: React Native Paper
-- **Navigation**: React Navigation v7 (Drawer Navigator)
+- **UI library**: React Native Paper
+- **Navigation**: React Navigation v7 — a native-stack for Home/SignIn/SignUp/Main, and
+  a drawer for the authenticated app
 - **Charts**: React Native Chart Kit
-- **State Management**: React Context API + AsyncStorage
-- **HTTP Client**: Axios
-- **Testing**: Jest + React Native Testing Library
+- **State**: React Context (`AuthContext`) + AsyncStorage for token persistence
+- **HTTP client**: Axios, with request/response interceptors for auth + token refresh
 
 ## Prerequisites
 
-- Node.js 16+ (LTS recommended)
-- npm or yarn
-- Expo CLI (`npm install -g expo-cli`)
-- For iOS development: macOS with Xcode
-- For Android development: Android Studio with Android SDK
+- Node.js 18+ (LTS recommended)
+- npm
+- Expo CLI (`npx expo`, no global install required)
+- iOS: macOS + Xcode. Android: Android Studio + SDK. Or just use Expo Go on a physical device.
 
 ## Installation
 
-### 1. Install dependencies
-
 ```bash
 cd mobile-frontend
-npm install --legacy-peer-deps
+npm install
 ```
 
-**Note**: We use `--legacy-peer-deps` to resolve peer dependency conflicts between React Navigation v7 and v6 packages.
+No `--legacy-peer-deps` flag is needed — the dependency tree (React Navigation v7,
+`react-native-screens`, `react-test-renderer`) is fully aligned.
 
-### 2. Configure environment variables
-
-Copy the example environment file and update with your backend API URL:
+### Configure the backend URL
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+| Platform                  | `EXPO_PUBLIC_API_BASE_URL`                         |
+| ------------------------- | -------------------------------------------------- |
+| Android emulator          | `http://10.0.2.2:8000` (also the default if unset) |
+| iOS simulator             | `http://localhost:8000`                            |
+| Physical device / Expo Go | `http://<your-machine-LAN-IP>:8000`                |
 
-```env
-# For Android Emulator (localhost alias)
-EXPO_PUBLIC_API_URL=http://10.0.2.2:8000
+Make sure the backend is running first (see the repo root docs / `code/backend`).
 
-# For iOS Simulator
-# EXPO_PUBLIC_API_URL=http://localhost:8000
-
-# For Physical Device (replace with your computer's IP)
-# EXPO_PUBLIC_API_URL=http://192.168.1.100:8000
-```
-
-## Running the App
-
-### Start the development server
+## Running the app
 
 ```bash
-npm start
+npx expo start
 ```
 
-This will start the Expo development server and show a QR code.
+Then press `i` for iOS simulator, `a` for Android emulator, or scan the QR code with
+Expo Go on a physical device.
 
-### Run on Android
+The app always opens on the **Home** screen. From there:
 
-```bash
-npm run android
-```
+- Signed out → "Get started" / "Sign in" take you to `SignUp` / `SignIn`
+- Signed in → "Go to Dashboard" takes you straight into the protected drawer app (`Main`)
 
-Or press `a` in the terminal after running `npm start`.
+If a session expires (refresh token invalid), the app automatically returns you to
+Home.
 
-**Requirements**:
-
-- Android Emulator running, OR
-- Physical Android device connected via USB with USB debugging enabled
-
-### Run on iOS (macOS only)
-
-```bash
-npm run ios
-```
-
-Or press `i` in the terminal after running `npm start`.
-
-**Requirements**:
-
-- macOS with Xcode installed
-- iOS Simulator running
-
-### Run on Web
-
-```bash
-npm run web
-```
-
-### Scan QR Code with Expo Go
-
-1. Install Expo Go app on your phone ([iOS](https://apps.apple.com/app/expo-go/id982107779) | [Android](https://play.google.com/store/apps/details?id=host.exp.exponent))
-2. Scan the QR code shown in terminal
-3. Make sure your phone and computer are on the same network
-4. Update the `.env` file with your computer's local IP address
-
-## Backend Setup
-
-The mobile app requires the Fluxora backend to be running. To start the backend:
-
-```bash
-cd ../code/backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
-
-The backend will start on `http://localhost:8000`.
-
-### Verify Backend Connection
-
-Once the app is running, go to the Dashboard screen. It should display:
-
-- Backend API Status: HEALTHY (in green)
-- Summary statistics (predictions, accuracy, etc.)
-
-If you see errors, check:
-
-1. Backend is running (`http://localhost:8000/health` should return `{"status": "healthy"}`)
-2. `.env` file has correct API URL for your platform
-3. Firewall isn't blocking connections
-
-## Testing
-
-### Run all tests
-
-```bash
-npm test
-```
-
-### Run tests in watch mode
-
-```bash
-npm run test:watch
-```
-
-### Run tests with coverage
-
-```bash
-npm run test:coverage
-```
-
-**Note**: Some tests may have compatibility issues with the current Expo/React Native version. The core functionality is tested and working.
-
-## Project Structure
+## Project structure
 
 ```
 mobile-frontend/
+├── App.js                       # Root: providers + NavigationContainer
 ├── src/
-│   ├── api/              # API client and backend integration
-│   ├── components/       # Reusable UI components
-│   ├── contexts/         # React Context providers
-│   ├── constants/        # App configuration constants
-│   ├── navigation/       # Navigation configuration
-│   ├── screens/          # Screen components
-│   ├── styles/           # Theme and styling
-│   ├── tests/            # Test files
-│   └── utils/            # Utility functions
-├── assets/               # Images, icons, fonts
-├── App.js               # Root component
-├── app.json             # Expo configuration
-├── package.json         # Dependencies
-├── babel.config.js      # Babel configuration
-├── jest.config.js       # Jest configuration
-└── .env.example         # Environment variables template
+│   ├── api/api.js               # Axios client, token storage, every backend call
+│   ├── constants/config.js      # API base URL resolution
+│   ├── contexts/AuthContext.js  # Login/register/logout, session bootstrap
+│   ├── navigation/
+│   │   ├── RootNavigator.js     # Home / SignIn / SignUp / Main (auth-gated)
+│   │   └── AppNavigator.js      # Protected drawer: Dashboard, Predictions, Analytics, Data, Settings
+│   ├── screens/
+│   │   ├── HomeScreen.js
+│   │   ├── SignInScreen.js
+│   │   ├── SignUpScreen.js
+│   │   ├── DashboardScreen.js
+│   │   ├── AnalyticsScreen.js
+│   │   ├── PredictionsScreen.js
+│   │   ├── DataScreen.js        # Full CRUD over energy readings
+│   │   └── SettingsScreen.js
+│   ├── components/              # StatCard, DataRecordModal (shared create/edit form)
+│   └── styles/theme.js          # Design tokens / react-native-paper theme
 ```
 
-## Key Components
+## Backend integration
 
-### Screens
+Every network call lives in `src/api/api.js`:
 
-- **DashboardScreen**: Main dashboard with system overview and quick actions
-- **PredictionsScreen**: Energy prediction interface with input form
-- **AnalyticsScreen**: Charts and visualizations for energy data
-- **SettingsScreen**: App settings and user preferences
-- **HomeScreen**: User profile and task management
+- `loginRequest` / `registerRequest` / `fetchCurrentUser` → `/v1/auth/*`
+- `getDataRecords` / `createDataRecord` / `updateDataRecord` / `deleteDataRecord` → `/v1/data/*`
+- `getAnalytics` / `getAnalyticsSummary` → `/v1/analytics/*`
+- `getPredictions` / `triggerTraining` → `/v1/predictions/*`
+- `getHealthStatus` → `/health`
 
-### API Integration
+## Testing
 
-The app communicates with the backend through the API client in `src/api/api.js`:
-
-- `getHealth()` - Check backend status
-- `postPredictions(payload)` - Submit prediction requests
-- `getSummary()` - Get summary statistics
-- `getHistoricalData(params)` - Fetch historical energy data
-- `getModelMetrics()` - Get ML model performance metrics
-
-### Authentication
-
-Authentication is handled through `AuthContext` which provides:
-
-- `user` - Current user object
-- `login(username, password)` - Login function
-- `logout()` - Logout function
-- `register(username, email, password)` - Registration function
-- `isAuthenticated` - Boolean authentication status
-
-## Configuration
-
-### API Configuration
-
-Edit `src/constants/config.js` to change API settings:
-
-```javascript
-export const API_CONFIG = {
-  BASE_URL: __DEV__
-    ? process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:8000"
-    : "https://api.fluxora.com",
-  TIMEOUT: 10000,
-  RETRY_ATTEMPTS: 3,
-};
-```
-
-### Feature Flags
-
-Toggle features in `src/constants/config.js`:
-
-```javascript
-export const FEATURES = {
-  ENABLE_NOTIFICATIONS: true,
-  ENABLE_OFFLINE_MODE: true,
-  ENABLE_ANALYTICS: true,
-};
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**1. Metro bundler errors**
-
-```bash
-# Clear cache and restart
-npx expo start --clear
-```
-
-**2. Android build errors**
-
-```bash
-# Clean Android build
-cd android && ./gradlew clean && cd ..
-```
-
-**3. iOS build errors**
-
-```bash
-# Clean iOS build
-cd ios && rm -rf Pods Podfile.lock && pod install && cd ..
-```
-
-**4. "Cannot connect to backend" error**
-
-Check that:
-
-- Backend is running on the expected port
-- Your `.env` file has the correct IP/URL
-- No firewall is blocking connections
-- For Android emulator, use `10.0.2.2` instead of `localhost`
-
-**5. Module resolution errors**
-
-```bash
-# Reinstall dependencies
-rm -rf node_modules package-lock.json
-npm install --legacy-peer-deps
-```
-
-### Platform-Specific Notes
-
-**Android Emulator**:
-
-- Use `http://10.0.2.2:8000` for localhost (not `http://localhost:8000`)
-- Enable "Wipe data" in AVD Manager if app crashes on startup
-
-**iOS Simulator**:
-
-- Use `http://localhost:8000` for localhost
-- If keyboard doesn't appear, press Cmd+K to toggle it
-
-**Physical Devices**:
-
-- Computer and device must be on same Wi-Fi network
-- Use computer's local IP address (e.g., `http://192.168.1.100:8000`)
-- Find your IP: `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
-
-## Building for Production
-
-### Android APK
-
-```bash
-expo build:android
-```
-
-### iOS IPA
-
-```bash
-expo build:ios
-```
-
-### EAS Build (Recommended)
-
-```bash
-npm install -g eas-cli
-eas build --platform android
-eas build --platform ios
-```
-
-## Contributing
-
-1. Create a feature branch from `main`
-2. Make your changes
-3. Write tests for new features
-4. Run tests: `npm test`
-5. Run linter: `npm run lint`
-6. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details
+The previous test suite covered a local-only "tasks" feature that no longer exists in
+this version of the app. It's been removed rather than left failing; the Jest config
+and RTL/AsyncStorage mocks in `src/tests/setup.js` are still in place if you want to
+add new tests for the current screens.

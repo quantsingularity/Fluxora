@@ -1,15 +1,13 @@
 #!/bin/bash
 
-# docker_manager.sh
-# Simplifies Docker operations for Fluxora
-#
-# This script provides easy commands for managing Docker containers:
-# - build: Build all Docker images
-# - start: Start all containers
-# - stop: Stop all containers
-# - status: Check status of all containers
-# - logs: View logs from containers
-# - clean: Remove all containers and images
+# manage_docker.sh (a.k.a. the Docker manager)
+# Simplifies Docker operations for the Fluxora backend:
+# - build: Build the Docker image
+# - start: Start the container
+# - stop: Stop the container
+# - status: Check status of the container
+# - logs: View logs from the container
+# - clean: Remove containers, images and volumes
 
 set -euo pipefail
 
@@ -21,8 +19,12 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
-# Default project directory
-PROJECT_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The only docker-compose.yml that's actually wired up to build correctly
+# (it needs the sibling code/ml_core package in its build context) lives in
+# code/backend/. There is no top-level docker-compose.yml in this repo.
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMPOSE_FILE="${PROJECT_DIR}/code/backend/docker-compose.yml"
 
 # Function to print section headers
 print_section() {
@@ -44,39 +46,45 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
-# Function to check if Docker is installed
+# Function to check if Docker (and a Compose implementation) is installed.
+# Populates the global $COMPOSE array so callers can do "${COMPOSE[@]} up -d"
+# regardless of whether the host has the modern `docker compose` plugin or
+# the legacy standalone `docker-compose` binary.
 check_docker() {
     if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed. Please run setup_environment.sh first."
+        print_error "Docker is not installed. Please install Docker Desktop or Docker Engine."
         exit 1
     fi
 
-    if ! command -v docker-compose &> /dev/null; then
-        print_error "Docker Compose is not installed. Please run setup_environment.sh first."
+    if docker compose version &> /dev/null; then
+        COMPOSE=(docker compose)
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE=(docker-compose)
+    else
+        print_error "Neither 'docker compose' nor 'docker-compose' is available."
+        print_warning "Install Docker Compose (it ships with modern Docker Desktop/Engine)."
         exit 1
     fi
 }
 
-# Function to check if docker-compose.yml exists
+# Function to check if the compose file exists
 check_compose_file() {
-    if [ ! -f "${PROJECT_DIR}/docker-compose.yml" ]; then
-        print_error "docker-compose.yml not found in ${PROJECT_DIR}"
-        print_warning "Please run this script from the Fluxora project root directory"
-        print_warning "or specify the project directory with -d option"
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        print_error "docker-compose.yml not found at ${COMPOSE_FILE}"
         exit 1
     fi
 }
 
 # Function to build Docker images
 build_images() {
-    print_section "Building Docker Images"
+    print_section "Building Docker Image"
 
     check_compose_file
 
-    print_warning "Building all Docker images. This may take a while..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" build
+    print_warning "Building the Fluxora API image. This may take a while..."
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" build
 
-    print_success "All Docker images built successfully"
+    print_success "Docker image built successfully"
 }
 
 # Function to start Docker containers
@@ -85,12 +93,12 @@ start_containers() {
 
     check_compose_file
 
-    print_warning "Starting all containers in detached mode..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" up -d
+    print_warning "Starting the container in detached mode..."
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d
 
-    print_success "All containers started successfully"
-    print_warning "Use 'docker_manager.sh status' to check container status"
-    print_warning "Use 'docker_manager.sh logs' to view container logs"
+    print_success "Container started successfully"
+    print_warning "Use './manage_docker.sh status' to check container status"
+    print_warning "Use './manage_docker.sh logs' to view container logs"
 }
 
 # Function to stop Docker containers
@@ -99,10 +107,10 @@ stop_containers() {
 
     check_compose_file
 
-    print_warning "Stopping all containers..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" down
+    print_warning "Stopping the container..."
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" down
 
-    print_success "All containers stopped successfully"
+    print_success "Container stopped successfully"
 }
 
 # Function to check status of Docker containers
@@ -112,21 +120,24 @@ check_status() {
     check_compose_file
 
     echo "Current running containers:"
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" ps
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" ps
 }
 
 # Function to view Docker container logs
 view_logs() {
+    # $1 is optional: a specific service name, or empty for all services.
+    local service="${1:-}"
+
     print_section "Docker Container Logs"
 
     check_compose_file
 
-    if [ -z "$1" ]; then
+    if [ -z "$service" ]; then
         print_warning "Showing logs for all containers. Press Ctrl+C to exit."
-        docker-compose -f "${PROJECT_DIR}/docker-compose.yml" logs -f
+        "${COMPOSE[@]}" -f "$COMPOSE_FILE" logs -f
     else
-        print_warning "Showing logs for $1. Press Ctrl+C to exit."
-        docker-compose -f "${PROJECT_DIR}/docker-compose.yml" logs -f "$1"
+        print_warning "Showing logs for $service. Press Ctrl+C to exit."
+        "${COMPOSE[@]}" -f "$COMPOSE_FILE" logs -f "$service"
     fi
 }
 
@@ -136,19 +147,16 @@ clean_docker() {
 
     check_compose_file
 
-    print_warning "Stopping all containers..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" down
+    print_warning "Stopping and removing containers..."
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" down --remove-orphans
 
-    print_warning "Removing all project containers..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" rm -f
+    print_warning "Removing project images..."
+    "${COMPOSE[@]}" -f "$COMPOSE_FILE" down --rmi all
 
-    print_warning "Removing all project images..."
-    docker-compose -f "${PROJECT_DIR}/docker-compose.yml" down --rmi all
-
-    print_warning "Removing all dangling images..."
+    print_warning "Removing dangling images..."
     docker image prune -f
 
-    print_warning "Removing all dangling volumes..."
+    print_warning "Removing dangling volumes..."
     docker volume prune -f
 
     print_success "Docker cleanup completed successfully"
@@ -161,33 +169,37 @@ show_help() {
     echo "Usage: $0 [options] command [service_name]"
     echo ""
     echo "Commands:"
-    echo "  build              Build all Docker images"
-    echo "  start              Start all containers"
-    echo "  stop               Stop all containers"
-    echo "  status             Check status of all containers"
-    echo "  logs [service]     View logs from all or specific container"
-    echo "  clean              Remove all containers and images"
+    echo "  build              Build the Docker image"
+    echo "  start              Start the container"
+    echo "  stop               Stop the container"
+    echo "  status             Check status of the container"
+    echo "  logs [service]     View logs (all services, or one named service)"
+    echo "  clean              Remove containers, images and dangling volumes"
     echo ""
     echo "Options:"
     echo "  -h, --help         Show this help message"
-    echo "  -d, --directory    Specify Fluxora project directory (default: current directory)"
+    echo "  -f, --file         Specify a different docker-compose.yml path"
+    echo "                     (default: code/backend/docker-compose.yml)"
     echo ""
     echo "Examples:"
-    echo "  $0 build                   # Build all Docker images"
-    echo "  $0 start                   # Start all containers"
-    echo "  $0 logs api                # View logs from the API service"
-    echo "  $0 -d /path/to/fluxora start  # Start containers in specific directory"
+    echo "  $0 build                   # Build the Docker image"
+    echo "  $0 start                   # Start the container"
+    echo "  $0 logs                    # View logs from all services"
+    echo "  $0 logs api                # View logs from the 'api' service only"
 }
 
 # Parse command line arguments
+COMMAND=""
+SERVICE=""
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
             show_help
             exit 0
             ;;
-        -d|--directory)
-            PROJECT_DIR="$2"
+        -f|--file)
+            COMPOSE_FILE="$2"
             shift 2
             ;;
         build|start|stop|status|clean)
@@ -196,8 +208,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         logs)
             COMMAND="$1"
-            SERVICE="$2"
-            shift 2
+            shift
+            # The service name is optional -- don't assume $1 exists.
+            if [[ $# -gt 0 ]]; then
+                SERVICE="$1"
+                shift
+            fi
             ;;
         *)
             print_error "Unknown option or command: $1"
@@ -207,11 +223,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if Docker is installed
+# Check if Docker (and a compose implementation) is installed
 check_docker
 
 # Execute the specified command
-case $COMMAND in
+case "$COMMAND" in
     build)
         build_images
         ;;
@@ -229,6 +245,9 @@ case $COMMAND in
         ;;
     clean)
         clean_docker
+        ;;
+    "")
+        show_help
         ;;
     *)
         show_help

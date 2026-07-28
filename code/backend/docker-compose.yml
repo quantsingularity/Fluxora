@@ -2,18 +2,32 @@ version: "3.9"
 
 services:
   api:
-    build: .
+    build:
+      # Bug fix: build context must be `code/` (the parent of both
+      # `backend/` and `ml_core/`), not `backend/` alone — the backend
+      # imports the sibling `ml_core` package at startup, so a context of
+      # `.` silently produced an image that crashed immediately on boot.
+      context: ..
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
       - ENV=production
-      - DATABASE_URL=sqlite:///./fluxora.db
+      # Bug fix: previously hardcoded to a relative path inside the
+      # container's working directory, which was never inside the `/app/data`
+      # volume below — every container restart silently lost the database
+      # and the trained model.
+      - DATABASE_URL=sqlite:////app/data/fluxora.db
+      - MODEL_PATH=/app/data/fluxora_model.joblib
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - LOG_LEVEL=INFO
     volumes:
       - ./data:/app/data
     restart: unless-stopped
     healthcheck:
+      # Bug fix: the base image previously had no `curl` binary installed,
+      # so this healthcheck always failed with "curl: not found" regardless
+      # of whether the API was actually healthy.
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s

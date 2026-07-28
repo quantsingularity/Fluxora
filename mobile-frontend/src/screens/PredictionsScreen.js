@@ -1,239 +1,251 @@
-import { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
-  ActivityIndicator,
-  Appbar,
+  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
+import {
   Button,
   Card,
-  Dialog,
-  HelperText,
-  Paragraph,
-  Portal,
-  TextInput,
+  Chip,
+  SegmentedButtons,
+  Snackbar,
+  Text,
   Title,
-  useTheme,
 } from "react-native-paper";
-import { postPredictions } from "../api/api";
+import { LineChart } from "react-native-chart-kit";
+import StatCard from "../components/StatCard";
+import { useAuth } from "../contexts/AuthContext";
+import { getPredictions, triggerTraining } from "../api/api";
+import { colors, fontSize, shadows, spacing } from "../styles/theme";
 
-const PredictionsScreen = ({ navigation }) => {
-  const theme = useTheme();
-  const [timestampInput, setTimestampInput] = useState(
-    new Date().toISOString(),
-  );
-  const [meterIdInput, setMeterIdInput] = useState("meter_123");
-  const [contextInput, setContextInput] = useState("{}");
-  const [contextError, setContextError] = useState(null);
+const screenWidth = Dimensions.get("window").width;
+const HORIZONS = [
+  { value: "1", label: "1d" },
+  { value: "7", label: "7d" },
+  { value: "14", label: "14d" },
+  { value: "30", label: "30d" },
+];
 
-  const [predictions, setPredictions] = useState(null);
-  const [confidenceIntervals, setConfidenceIntervals] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [errorVisible, setErrorVisible] = useState(false);
+const fmtKwh = (n) =>
+  `${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh`;
 
-  const hideErrorDialog = () => setErrorVisible(false);
+export default function PredictionsScreen() {
+  const { user } = useAuth();
+  const [days, setDays] = useState("7");
+  const [predictions, setPredictions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [training, setTraining] = useState(false);
+  const [snackbar, setSnackbar] = useState(null);
 
-  const validateContextJson = (text) => {
-    setContextInput(text);
+  const load = useCallback(async (d) => {
     try {
-      JSON.parse(text);
-      setContextError(null);
-    } catch (_e) {
-      setContextError("Invalid JSON format");
-    }
-  };
-
-  const handlePredict = async () => {
-    if (!timestampInput || !meterIdInput) {
-      setError("Timestamp and Meter ID are required.");
-      setErrorVisible(true);
-      return;
-    }
-
-    let parsedContext;
-    try {
-      parsedContext = JSON.parse(contextInput);
-      setContextError(null);
-    } catch (_e) {
-      setContextError("Invalid JSON format");
-      setError("Context Features must be a valid JSON object.");
-      setErrorVisible(true);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-      setErrorVisible(false);
-      setPredictions(null);
-      setConfidenceIntervals(null);
-
-      const payload = {
-        timestamps: [timestampInput],
-        meter_ids: [meterIdInput],
-        context_features: parsedContext,
-      };
-
-      console.log("Sending payload:", JSON.stringify(payload));
-      const data = await postPredictions(payload);
-      console.log("Received response:", data);
-
-      setPredictions(data.predictions);
-      setConfidenceIntervals(data.confidence_intervals);
+      const res = await getPredictions(Number(d));
+      setPredictions(res || []);
     } catch (err) {
-      console.error("Prediction API Call Failed:", err);
-      let errorMessage =
-        "Prediction failed. Please check the backend connection and input format.";
-      if (err.response) {
-        errorMessage += `\nDetails: ${JSON.stringify(err.response.data)}`;
-      } else if (err.request) {
-        errorMessage =
-          "Prediction failed: No response received from the server. Is it running?";
-      } else {
-        errorMessage = `Prediction failed: ${err.message}`;
-      }
-      setError(errorMessage);
-      setErrorVisible(true);
+      console.error("Failed to load predictions", err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      load(days);
+    }, [load, days]),
+  );
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    load(days);
+  };
+
+  const handleTrain = async () => {
+    setTraining(true);
+    try {
+      const res = await triggerTraining();
+      setSnackbar(`Model retrained (status: ${res.status}).`);
+    } catch (err) {
+      setSnackbar(
+        err?.response?.data?.error?.message ||
+          "Training failed or requires admin access.",
+      );
+    } finally {
+      setTraining(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <Appbar.Header>
-        {/* <Appbar.BackAction onPress={() => navigation.goBack()} /> */}
-        <Appbar.Content title="Energy Predictions" />
-      </Appbar.Header>
+  const values = predictions.map((p) => p.predicted_consumption);
+  const avg = values.length
+    ? values.reduce((a, b) => a + b, 0) / values.length
+    : 0;
+  const peak = values.length ? Math.max(...values) : 0;
+  const low = values.length ? Math.min(...values) : 0;
 
-      <ScrollView style={styles.content}>
-        <Card style={styles.card}>
+  const maxPoints = 14;
+  const step = Math.max(1, Math.ceil(predictions.length / maxPoints));
+  const sampled = predictions.filter((_, i) => i % step === 0);
+  const chartLabels = sampled.map((p) =>
+    new Date(p.timestamp).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+  const chartValues = sampled.map((p) => p.predicted_consumption);
+
+  return (
+    <View style={styles.root}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        <Text style={styles.heading}>Predictions</Text>
+        <Text style={styles.subheading}>
+          Forecasted consumption with confidence intervals.
+        </Text>
+
+        <SegmentedButtons
+          value={days}
+          onValueChange={setDays}
+          style={styles.segmented}
+          buttons={HORIZONS}
+        />
+
+        {user?.is_superuser && (
+          <Button
+            mode="outlined"
+            icon="brain"
+            onPress={handleTrain}
+            loading={training}
+            disabled={training}
+            style={styles.trainButton}
+          >
+            {training ? "Training…" : "Retrain model"}
+          </Button>
+        )}
+
+        <View style={styles.statsRow}>
+          <StatCard
+            icon="chart-line"
+            label="Average"
+            value={fmtKwh(avg)}
+            accent={colors.primary}
+            style={styles.statCardThird}
+          />
+          <StatCard
+            icon="trending-up"
+            label="Peak"
+            value={fmtKwh(peak)}
+            accent={colors.error}
+            style={styles.statCardThird}
+          />
+          <StatCard
+            icon="trending-down"
+            label="Lowest"
+            value={fmtKwh(low)}
+            accent={colors.secondary}
+            style={styles.statCardThird}
+          />
+        </View>
+
+        <Card
+          style={[styles.card, shadows.small, { marginBottom: spacing.xxl }]}
+        >
           <Card.Content>
-            <Title>Input Parameters</Title>
-            <TextInput
-              label="Timestamp (ISO Format)"
-              value={timestampInput}
-              onChangeText={setTimestampInput}
-              mode="outlined"
-              style={styles.input}
-            />
-            <TextInput
-              label="Meter ID"
-              value={meterIdInput}
-              onChangeText={setMeterIdInput}
-              mode="outlined"
-              style={styles.input}
-            />
-            <TextInput
-              label="Context Features (JSON)"
-              value={contextInput}
-              onChangeText={validateContextJson}
-              mode="outlined"
-              style={styles.input}
-              multiline
-              numberOfLines={4}
-              error={!!contextError}
-            />
-            <HelperText type="error" visible={!!contextError}>
-              {contextError}
-            </HelperText>
-            <Button
-              mode="contained"
-              onPress={handlePredict}
-              disabled={loading || !!contextError}
-              loading={loading}
-              style={styles.button}
-              icon="send"
-            >
-              Get Predictions
-            </Button>
+            <View style={styles.cardHeaderRow}>
+              <Title style={styles.cardTitle}>
+                Forecast — next {days} day{days !== "1" ? "s" : ""}
+              </Title>
+              <Chip compact style={styles.chip} textStyle={styles.chipText}>
+                Model
+              </Chip>
+            </View>
+            {chartValues.length > 0 ? (
+              <LineChart
+                data={{
+                  labels: chartLabels,
+                  datasets: [{ data: chartValues }],
+                }}
+                width={screenWidth - spacing.lg * 2 - 32}
+                height={220}
+                bezier
+                withInnerLines={false}
+                chartConfig={{
+                  backgroundGradientFrom: colors.surface,
+                  backgroundGradientTo: colors.surface,
+                  decimalPlaces: 1,
+                  color: (opacity = 1) => `rgba(5, 150, 105, ${opacity})`,
+                  labelColor: () => colors.textSecondary,
+                  propsForDots: {
+                    r: "3",
+                    strokeWidth: "2",
+                    stroke: colors.primary,
+                  },
+                }}
+                style={{ marginLeft: -spacing.lg, borderRadius: 12 }}
+              />
+            ) : (
+              <Text style={styles.emptyText}>
+                {loading ? "Loading…" : "No forecast data available."}
+              </Text>
+            )}
           </Card.Content>
         </Card>
-
-        {loading && (
-          <ActivityIndicator
-            animating={true}
-            size="large"
-            style={styles.loader}
-            color={theme.colors.primary}
-          />
-        )}
-
-        {predictions && (
-          <Card style={styles.card}>
-            <Card.Content>
-              <Title>Prediction Results</Title>
-              {predictions.map((pred, index) => (
-                <View key={index} style={styles.predictionItem}>
-                  <Paragraph>
-                    Prediction:{" "}
-                    <Text style={styles.predictionValue}>
-                      {pred.toFixed(4)}
-                    </Text>
-                  </Paragraph>
-                  {confidenceIntervals?.[index] && (
-                    <Paragraph style={styles.confidenceText}>
-                      (95% CI: {confidenceIntervals[index][0].toFixed(4)} -{" "}
-                      {confidenceIntervals[index][1].toFixed(4)})
-                    </Paragraph>
-                  )}
-                </View>
-              ))}
-            </Card.Content>
-          </Card>
-        )}
       </ScrollView>
 
-      <Portal>
-        <Dialog visible={errorVisible} onDismiss={hideErrorDialog}>
-          <Dialog.Title>Prediction Error</Dialog.Title>
-          <Dialog.Content>
-            <Paragraph>{error}</Paragraph>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={hideErrorDialog}>OK</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
+      <Snackbar
+        visible={!!snackbar}
+        onDismiss={() => setSnackbar(null)}
+        duration={3500}
+      >
+        {snackbar}
+      </Snackbar>
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  content: {
-    flex: 1,
-    padding: 15,
-  },
-  card: {
-    marginBottom: 15,
-    elevation: 3,
-  },
-  input: {
-    marginBottom: 10,
-  },
-  button: {
-    marginTop: 10,
-  },
-  loader: {
-    marginVertical: 20,
-  },
-  predictionItem: {
-    marginBottom: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-  },
-  predictionValue: {
-    fontWeight: "bold",
-  },
-  confidenceText: {
-    fontSize: 12,
-    color: "#666",
+  root: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { padding: spacing.lg },
+  heading: { fontSize: fontSize.xl, fontWeight: "800" },
+  subheading: {
+    color: colors.textSecondary,
     marginTop: 2,
+    marginBottom: spacing.md,
+  },
+  segmented: { marginBottom: spacing.md },
+  trainButton: { marginBottom: spacing.md, borderRadius: 10 },
+  statsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
+  statCardThird: { flex: 1 },
+  card: { borderRadius: 16, marginTop: spacing.sm },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  cardTitle: { fontSize: fontSize.md, flexShrink: 1 },
+  chip: { backgroundColor: "rgba(59,130,246,0.12)" },
+  chipText: {
+    color: colors.secondaryDark,
+    fontWeight: "700",
+    fontSize: fontSize.xs,
+  },
+  emptyText: {
+    color: colors.textMuted,
+    textAlign: "center",
+    paddingVertical: spacing.lg,
   },
 });
-
-export default PredictionsScreen;

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# api_tester.sh
+# test_api.sh (a.k.a. the API tester)
 # Tests API endpoints and generates example requests for Fluxora
 #
 # This script:
@@ -8,6 +8,10 @@
 # - Generates example API requests for common operations
 # - Validates API responses
 # - Creates a collection of example requests
+#
+# Talks to the real Fluxora API (see code/backend/app/api/v1/*.py):
+#   POST /v1/auth/register, POST /v1/auth/token (form-urlencoded),
+#   GET/POST /v1/data/, GET /v1/analytics/summary, GET /v1/predictions/
 
 set -euo pipefail
 
@@ -19,11 +23,15 @@ RED="\033[0;31m"
 BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default settings
 API_HOST="localhost"
 API_PORT="8000"
 API_BASE_URL="http://${API_HOST}:${API_PORT}"
-OUTPUT_DIR="$(pwd)/api_examples"
+OUTPUT_DIR="${SCRIPT_DIR}/api_examples"
+TEST_EMAIL="apitester@example.com"
+TEST_PASSWORD="test-password-123"
 VERBOSE=false
 
 # Function to print section headers
@@ -62,6 +70,14 @@ check_curl() {
     fi
 }
 
+# Extracts a JSON field's string/number value from a response body without
+# requiring a JSON parser to be installed (jq is not a project dependency).
+json_field() {
+    local json="$1"
+    local field="$2"
+    echo "$json" | grep -o "\"${field}\":[^,}]*" | head -1 | sed -E 's/^"[^"]+":\s*"?//; s/"?$//'
+}
+
 # Function to check if API is running
 check_api() {
     print_section "Checking API Availability"
@@ -86,88 +102,194 @@ ensure_output_dir() {
     fi
 }
 
-# Function to generate authentication token
+# Function to register (if needed) and authenticate, returning the access token
 get_auth_token() {
-    print_section "Generating Authentication Token"
+    print_section "Authenticating" >&2
 
-    local username="user@example.com"
-    local password="secure_password"
-
-    print_warning "Requesting authentication token for ${username}..."
-
-    local response=$(curl -s -X POST "${API_BASE_URL}/api/auth/token" \
+    print_warning "Registering ${TEST_EMAIL} (if not already registered)..." >&2
+    local register_response
+    register_response=$(curl -s -X POST "${API_BASE_URL}/v1/auth/register" \
         -H "Content-Type: application/json" \
-        -d "{
-            \"username\": \"${username}\",
-            \"password\": \"${password}\"
-        }")
+        -d "{\"email\": \"${TEST_EMAIL}\", \"password\": \"${TEST_PASSWORD}\"}")
+    print_verbose "Register response: $register_response" >&2
 
-    print_verbose "Response: $response"
+    print_warning "Requesting an access token for ${TEST_EMAIL}..." >&2
 
-    # Extract token from response
-    local token=$(echo "$response" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+    # The real login endpoint is OAuth2's standard password flow: a
+    # form-urlencoded body (not JSON), with the email in a field literally
+    # named "username" -- see app/api/v1/auth.py::login_for_access_token.
+    local response
+    response=$(curl -s -X POST "${API_BASE_URL}/v1/auth/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        --data-urlencode "username=${TEST_EMAIL}" \
+        --data-urlencode "password=${TEST_PASSWORD}")
+
+    print_verbose "Token response: $response" >&2
+
+    # The real response has "access_token" / "refresh_token" / "token_type"
+    # fields -- there is no field simply named "token".
+    local token
+    token=$(json_field "$response" "access_token")
 
     if [ -n "$token" ]; then
-        print_success "Authentication token obtained"
-        echo "$token"
+        print_success "Access token obtained" >&2
 
-        # Save example request to file
         cat > "${OUTPUT_DIR}/auth_example.sh" << EOF
 #!/bin/bash
-# Example: Authenticate and get token
+# Example: Register, then authenticate and get an access token
 
-curl -X POST "${API_BASE_URL}/api/auth/token" \\
+curl -X POST "${API_BASE_URL}/v1/auth/register" \\
   -H "Content-Type: application/json" \\
-  -d '{
-    "username": "user@example.com",
-    "password": "secure_password"
-  }'
+  -d '{"email": "you@example.com", "password": "a-secure-password"}'
+
+curl -X POST "${API_BASE_URL}/v1/auth/token" \\
+  -H "Content-Type: application/x-www-form-urlencoded" \\
+  --data-urlencode "username=you@example.com" \\
+  --data-urlencode "password=a-secure-password"
+# => {"access_token": "...", "refresh_token": "...", "token_type": "bearer"}
 EOF
         chmod +x "${OUTPUT_DIR}/auth_example.sh"
 
+        echo "$token"
         return 0
     else
-        print_error "Failed to obtain authentication token"
+        print_error "Failed to obtain an access token" >&2
         return 1
     fi
 }
 
-# Function to test prediction endpoint
+# Function to test the data endpoints (create + list)
+test_data_endpoints() {
+    print_section "Testing Data Endpoints"
+
+    local token=$1
+
+    print_warning "Creating an energy data record..."
+    local create_response
+    create_response=$(curl -s -X POST "${API_BASE_URL}/v1/data/" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -d '{
+            "consumption_kwh": 12.5,
+            "cost_usd": 1.5,
+            "temperature_c": 21.0,
+            "humidity_percent": 45.0
+        }')
+    print_verbose "Response: $create_response"
+
+    if echo "$create_response" | grep -q '"consumption_kwh"'; then
+        print_success "Data record created successfully"
+    else
+        print_error "Failed to create data record"
+        return 1
+    fi
+
+    print_warning "Listing energy data records..."
+    local list_response
+    list_response=$(curl -s -X GET "${API_BASE_URL}/v1/data/?limit=10" \
+        -H "Authorization: Bearer ${token}")
+    print_verbose "Response: $list_response"
+
+    if echo "$list_response" | grep -q '"consumption_kwh"'; then
+        print_success "Data listing successful"
+    else
+        print_error "Data listing failed"
+        return 1
+    fi
+
+    cat > "${OUTPUT_DIR}/data_example.sh" << EOF
+#!/bin/bash
+# Example: Create and list energy data records
+# Requires: export API_TOKEN="<access_token from auth_example.sh>"
+
+curl -X POST "${API_BASE_URL}/v1/data/" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer \$API_TOKEN" \\
+  -d '{
+    "consumption_kwh": 12.5,
+    "cost_usd": 1.5,
+    "temperature_c": 21.0,
+    "humidity_percent": 45.0
+  }'
+
+curl -X GET "${API_BASE_URL}/v1/data/?limit=10" \\
+  -H "Authorization: Bearer \$API_TOKEN"
+
+# Query a specific time range:
+curl -X GET "${API_BASE_URL}/v1/data/query?start_time=2026-01-01T00:00:00&end_time=2026-12-31T23:59:59" \\
+  -H "Authorization: Bearer \$API_TOKEN"
+EOF
+    chmod +x "${OUTPUT_DIR}/data_example.sh"
+
+    return 0
+}
+
+# Function to test the analytics endpoint
+test_analytics() {
+    print_section "Testing Analytics Endpoint"
+
+    local token=$1
+
+    print_warning "Requesting analytics summary..."
+    local response
+    response=$(curl -s -X GET "${API_BASE_URL}/v1/analytics/summary" \
+        -H "Authorization: Bearer ${token}")
+    print_verbose "Response: $response"
+
+    if echo "$response" | grep -q '"total_consumption_kwh"'; then
+        print_success "Analytics summary request successful"
+    else
+        print_error "Analytics summary request failed"
+        return 1
+    fi
+
+    cat > "${OUTPUT_DIR}/analytics_example.sh" << EOF
+#!/bin/bash
+# Example: Fetch analytics
+# Requires: export API_TOKEN="<access_token from auth_example.sh>"
+
+curl -X GET "${API_BASE_URL}/v1/analytics/summary" \\
+  -H "Authorization: Bearer \$API_TOKEN"
+
+curl -X GET "${API_BASE_URL}/v1/analytics/?period=month" \\
+  -H "Authorization: Bearer \$API_TOKEN"
+EOF
+    chmod +x "${OUTPUT_DIR}/analytics_example.sh"
+
+    return 0
+}
+
+# Function to test the prediction endpoint
 test_prediction() {
     print_section "Testing Prediction Endpoint"
 
     local token=$1
 
-    print_warning "Sending prediction request..."
+    print_warning "Requesting a 3-day forecast..."
 
-    local response=$(curl -s -X POST "${API_BASE_URL}/api/predict" \
-        -H "Content-Type: application/json" \
-        -H "X-API-Key: ${token}" \
-        -d '{
-            "timestamp": "2023-08-15T14:00:00",
-            "meter_id": "MT_001",
-            "historical_load": [0.45, 0.48, 0.52]
-        }')
+    # The real prediction endpoint is a GET with a `days` query parameter
+    # (not a POST with a meter_id/historical_load body -- there is no
+    # per-meter concept anywhere in this API).
+    local response
+    response=$(curl -s -X GET "${API_BASE_URL}/v1/predictions/?days=3" \
+        -H "Authorization: Bearer ${token}")
 
     print_verbose "Response: $response"
 
-    # Check if response contains prediction
-    if echo "$response" | grep -q '"prediction"'; then
+    if echo "$response" | grep -q '"predicted_consumption"'; then
         print_success "Prediction request successful"
 
-        # Save example request to file
         cat > "${OUTPUT_DIR}/prediction_example.sh" << EOF
 #!/bin/bash
-# Example: Make a prediction
+# Example: Get a forecast
+# Requires: export API_TOKEN="<access_token from auth_example.sh>"
 
-curl -X POST "${API_BASE_URL}/api/predict" \\
-  -H "Content-Type: application/json" \\
-  -H "X-API-Key: \$API_TOKEN" \\
-  -d '{
-    "timestamp": "2023-08-15T14:00:00",
-    "meter_id": "MT_001",
-    "historical_load": [0.45, 0.48, 0.52]
-  }'
+curl -X GET "${API_BASE_URL}/v1/predictions/?days=7" \\
+  -H "Authorization: Bearer \$API_TOKEN"
+
+# Admins only -- (re)trains the forecasting model on the current database:
+# curl -X POST "${API_BASE_URL}/v1/predictions/train" \\
+#   -H "Authorization: Bearer \$API_TOKEN"
 EOF
         chmod +x "${OUTPUT_DIR}/prediction_example.sh"
 
@@ -178,106 +300,80 @@ EOF
     fi
 }
 
-# Function to test data retrieval endpoint
-test_data_retrieval() {
-    print_section "Testing Data Retrieval Endpoint"
-
-    local token=$1
-
-    print_warning "Sending data retrieval request..."
-
-    local response=$(curl -s -X GET "${API_BASE_URL}/api/data/consumption" \
-        -H "X-API-Key: ${token}" \
-        -G --data-urlencode "start_date=2023-08-01" \
-        --data-urlencode "end_date=2023-08-15" \
-        --data-urlencode "meter_id=MT_001")
-
-    print_verbose "Response: $response"
-
-    # Check if response contains data
-    if echo "$response" | grep -q '"data"'; then
-        print_success "Data retrieval request successful"
-
-        # Save example request to file
-        cat > "${OUTPUT_DIR}/data_retrieval_example.sh" << EOF
-#!/bin/bash
-# Example: Retrieve consumption data
-
-curl -X GET "${API_BASE_URL}/api/data/consumption" \\
-  -H "X-API-Key: \$API_TOKEN" \\
-  -G \\
-  --data-urlencode "start_date=2023-08-01" \\
-  --data-urlencode "end_date=2023-08-15" \\
-  --data-urlencode "meter_id=MT_001"
-EOF
-        chmod +x "${OUTPUT_DIR}/data_retrieval_example.sh"
-
-        return 0
-    else
-        print_error "Data retrieval request failed"
-        return 1
-    fi
-}
-
 # Function to create a README file with API documentation
 create_api_readme() {
     print_section "Creating API Documentation"
 
-    cat > "${OUTPUT_DIR}/README.md" << EOF
+    cat > "${OUTPUT_DIR}/README.md" << 'EOF'
 # Fluxora API Examples
 
-This directory contains example scripts for interacting with the Fluxora API.
+This directory contains example scripts for interacting with the real
+Fluxora API. See `code/backend/app/api/v1/*.py` for the source of truth.
 
 ## Authentication
 
-Before using the API, you need to obtain an authentication token:
-
-\`\`\`bash
+```bash
 ./auth_example.sh
-\`\`\`
+```
 
-This will return a JSON response containing a token. Set this token as an environment variable:
+Registers a demo account (harmless if it already exists) and requests an
+access token. Note the login step uses a **form-urlencoded** body (OAuth2
+password flow), not JSON, and the field is named `username` even though
+its value is an email address. Save the printed `access_token` value:
 
-\`\`\`bash
-export API_TOKEN="your_token_here"
-\`\`\`
+```bash
+export API_TOKEN="the-access-token-value"
+```
 
-## Making Predictions
+Tokens expire -- use `POST /v1/auth/refresh` with your `refresh_token` to
+get a new pair without logging in again.
 
-To make energy consumption predictions:
+## Managing Energy Data
 
-\`\`\`bash
+```bash
+./data_example.sh
+```
+
+Creates and lists energy readings via `/v1/data/`.
+
+## Analytics
+
+```bash
+./analytics_example.sh
+```
+
+Fetches consumption/cost/efficiency rollups via `/v1/analytics/`.
+
+## Predictions
+
+```bash
 ./prediction_example.sh
-\`\`\`
+```
 
-## Retrieving Data
-
-To retrieve historical consumption data:
-
-\`\`\`bash
-./data_retrieval_example.sh
-\`\`\`
+Fetches a consumption forecast via `/v1/predictions/`.
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| /api/auth/token | POST | Obtain authentication token |
-| /api/predict | POST | Make energy consumption predictions |
-| /api/data/consumption | GET | Retrieve historical consumption data |
 | /health | GET | Check API health status |
+| /v1/auth/register | POST | Create an account |
+| /v1/auth/token | POST | Obtain an access/refresh token pair (form-urlencoded) |
+| /v1/auth/refresh | POST | Exchange a refresh token for a new pair |
+| /v1/auth/me | GET/PATCH/DELETE | View, update, or delete your own account |
+| /v1/data/ | GET/POST | List or create energy readings |
+| /v1/data/{id} | GET/PATCH/DELETE | Read, update, or delete one reading |
+| /v1/data/query | GET | Query readings within a time range |
+| /v1/analytics/ | GET | Consumption/cost/efficiency rollups (`?period=week|month|year`) |
+| /v1/analytics/summary | GET | Overall summary stats |
+| /v1/predictions/ | GET | Forecast future consumption (`?days=N`) |
+| /v1/predictions/train | POST | (Re)train the forecasting model (admin only) |
+| /v1/users/ | GET | List all accounts (admin only) |
 
 ## Request Headers
 
-- Content-Type: application/json
-- X-API-Key: Your authentication token
-
-## Common Parameters
-
-- timestamp: ISO format datetime (e.g., "2023-08-15T14:00:00")
-- meter_id: Meter identifier (e.g., "MT_001")
-- start_date: Start date for data retrieval (e.g., "2023-08-01")
-- end_date: End date for data retrieval (e.g., "2023-08-15")
+- `Content-Type: application/json` for JSON bodies (everything except login)
+- `Authorization: Bearer <access_token>` on every authenticated request
 EOF
 
     print_success "API documentation created at ${OUTPUT_DIR}/README.md"
@@ -296,16 +392,16 @@ run_all_tests() {
     ensure_output_dir
 
     # Get authentication token
-    local token=$(get_auth_token)
+    local token
+    token=$(get_auth_token)
     if [ -z "$token" ]; then
         return 1
     fi
 
-    # Test prediction endpoint
+    # Test data, analytics, and prediction endpoints
+    test_data_endpoints "$token"
+    test_analytics "$token"
     test_prediction "$token"
-
-    # Test data retrieval endpoint
-    test_data_retrieval "$token"
 
     # Create API documentation
     create_api_readme
@@ -329,7 +425,7 @@ show_help() {
     echo "  -h, --help         Show this help message"
     echo "  -H, --host         Specify API host (default: localhost)"
     echo "  -p, --port         Specify API port (default: 8000)"
-    echo "  -o, --output       Specify output directory for examples (default: ./api_examples)"
+    echo "  -o, --output       Specify output directory for examples (default: scripts/api_examples)"
     echo "  -v, --verbose      Enable verbose output"
     echo ""
     echo "Examples:"

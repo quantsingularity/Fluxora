@@ -1,50 +1,54 @@
-import React from "react";
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import AdminRoute from "./components/AdminRoute";
 import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
+import PublicOnlyRoute from "./components/PublicOnlyRoute";
+import { AuthProvider } from "./context/AuthContext";
 import Analytics from "./pages/Analytics";
 import Dashboard from "./pages/Dashboard";
+import DataRecords from "./pages/DataRecords";
+import Home from "./pages/Home";
+import NotFound from "./pages/NotFound";
 import Predictions from "./pages/Predictions";
 import Settings from "./pages/Settings";
+import SignIn from "./pages/SignIn";
+import SignUp from "./pages/SignUp";
+import Users from "./pages/Users";
 
-const App = () => {
-  const [isLoading, setIsLoading] = React.useState(true);
-
-  React.useEffect(() => {
-    // Simulate initial loading
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Loading screen
-  if (isLoading) {
-    return (
-      <div className="loading-screen">
-        <div className="loading-content">
-          <h1>Fluxora</h1>
-          <p>Energy Prediction System</p>
-          <div className="loading-spinner"></div>
-        </div>
-      </div>
-    );
-  }
-
+function App() {
   return (
-    // Using HashRouter instead of BrowserRouter for better compatibility with static hosting
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="predictions" element={<Predictions />} />
-          <Route path="analytics" element={<Analytics />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          {/* App always starts on the public homepage */}
+          <Route path="/" element={<Home />} />
+
+          {/* Auth routes: redirect away if already signed in */}
+          <Route element={<PublicOnlyRoute />}>
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/signup" element={<SignUp />} />
+          </Route>
+
+          {/* Protected application shell */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<Layout />}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard/analytics" element={<Analytics />} />
+              <Route path="/dashboard/predictions" element={<Predictions />} />
+              <Route path="/dashboard/data" element={<DataRecords />} />
+              <Route path="/dashboard/settings" element={<Settings />} />
+              <Route element={<AdminRoute />}>
+                <Route path="/dashboard/users" element={<Users />} />
+              </Route>
+            </Route>
+          </Route>
+
+          <Route path="/404" element={<NotFound />} />
+          <Route path="*" element={<Navigate to="/404" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
-};
+}
 
 export default App;

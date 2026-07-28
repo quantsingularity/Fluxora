@@ -64,9 +64,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ```json
 {
-  "data": {
-    /* response data */
-  },
+  "data": {/* response data */},
   "status": "success",
   "timestamp": "2025-12-30T10:00:00Z"
 }

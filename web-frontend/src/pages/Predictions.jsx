@@ -1,413 +1,274 @@
 import {
-  CalendarToday as CalendarIcon,
-  Send as SendIcon,
-  Timeline as TimelineIcon,
+  AutoGraphRounded,
+  ModelTrainingRounded,
+  TimelineRounded,
+  TrendingUpRounded,
 } from "@mui/icons-material";
 import {
+  Alert,
   Box,
   Button,
   Card,
   CardContent,
+  CardHeader,
   Chip,
-  CircularProgress,
-  Divider,
-  FormControl,
   Grid,
-  InputLabel,
   MenuItem,
-  Paper,
-  Select,
   Skeleton,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
+  Stack,
   TextField,
   Typography,
-  useTheme,
 } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Area,
   CartesianGrid,
-  Legend,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as ChartTooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { useDataService } from "../utils/dataService";
+import StatCard from "../components/StatCard";
+import { useAuth } from "../context/AuthContext";
+import { getPredictions, triggerTraining } from "../utils/api";
+
+const HORIZONS = [1, 3, 7, 14, 30, 90];
+
+const fmtKwh = (n) =>
+  `${Number(n ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} kWh`;
 
 const Predictions = () => {
-  const theme = useTheme();
-  const { getPredictionData } = useDataService();
+  const { user } = useAuth();
+  const [days, setDays] = useState(7);
+  const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [predictionData, setPredictionData] = useState([]);
-  const [meterIds, _setMeterIds] = useState(["meter_001", "meter_002"]);
-  const [selectedMeters, setSelectedMeters] = useState(["meter_001"]);
-  const [dateRange, setDateRange] = useState({
-    start: "2023-04-14",
-    end: "2023-04-15",
-  });
+  const [error, setError] = useState(null);
+  const [training, setTraining] = useState(false);
+  const [trainingResult, setTrainingResult] = useState(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Simulate API call delay
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        // Get prediction data
-        const data = getPredictionData(24);
-        setPredictionData(data);
-        setLoading(false);
-      } catch (error) {
-        console.error("Error fetching prediction data:", error);
-        setLoading(false);
-      }
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    getPredictions(days)
+      .then((res) => mounted && setPredictions(res || []))
+      .catch(
+        () => mounted && setError("Unable to generate predictions right now."),
+      )
+      .finally(() => mounted && setLoading(false));
+    return () => {
+      mounted = false;
     };
+  }, [days]);
 
-    fetchData();
-  }, [getPredictionData]);
-
-  const handleMeterChange = (event) => {
-    setSelectedMeters(event.target.value);
-  };
-
-  const handleDateChange = (event) => {
-    setDateRange({
-      ...dateRange,
-      [event.target.name]: event.target.value,
-    });
-  };
-
-  const handleSubmit = () => {
-    setSubmitting(true);
-    // Simulate API call
-    setTimeout(() => {
-      const newData = getPredictionData(24);
-      setPredictionData(newData);
-      setSubmitting(false);
-    }, 1500);
-  };
-
-  // Format data for chart
-  const chartData = predictionData.map((item) => ({
-    name: item.timestamp.split(" ")[1],
-    prediction: item.prediction,
-    lower: item.lower,
-    upper: item.upper,
-  }));
-
-  // Skeleton loader for prediction form
-  const FormSkeleton = () => (
-    <Card sx={{ mb: 4 }}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Generate New Prediction
-        </Typography>
-        <Divider sx={{ mb: 3 }} />
-
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={4}>
-            <Skeleton variant="rectangular" height={56} />
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Skeleton variant="rectangular" height={56} />
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <Skeleton variant="rectangular" height={56} />
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <Skeleton variant="rectangular" height={56} />
-          </Grid>
-        </Grid>
-      </CardContent>
-    </Card>
+  const chartData = useMemo(
+    () =>
+      predictions.map((p) => ({
+        timestamp: new Date(p.timestamp).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: days <= 3 ? "numeric" : undefined,
+        }),
+        predicted: p.predicted_consumption,
+        lower: p.confidence_interval?.lower,
+        upper: p.confidence_interval?.upper,
+      })),
+    [predictions, days],
   );
 
-  // Skeleton loader for results
-  const ResultsSkeleton = () => (
-    <Card>
-      <CardContent>
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            mb: 2,
-          }}
-        >
-          <Box>
-            <Skeleton variant="text" width={150} height={32} />
-            <Skeleton variant="text" width={200} />
-          </Box>
-          <Skeleton variant="rectangular" width={120} height={36} />
-        </Box>
+  const stats = useMemo(() => {
+    if (!predictions.length) return { avg: 0, peak: 0, low: 0 };
+    const values = predictions.map((p) => p.predicted_consumption);
+    return {
+      avg: values.reduce((a, b) => a + b, 0) / values.length,
+      peak: Math.max(...values),
+      low: Math.min(...values),
+    };
+  }, [predictions]);
 
-        <Divider sx={{ mb: 3 }} />
-
-        <Box
-          sx={{
-            height: 400,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <CircularProgress />
-        </Box>
-      </CardContent>
-    </Card>
-  );
+  const handleTrain = async () => {
+    setTraining(true);
+    setTrainingResult(null);
+    try {
+      const res = await triggerTraining();
+      setTrainingResult({
+        type: "success",
+        message: `Model retrained (status: ${res.status}).`,
+      });
+    } catch (err) {
+      const message =
+        err?.response?.data?.error?.message ||
+        "Training failed or requires admin access.";
+      setTrainingResult({ type: "error", message });
+    } finally {
+      setTraining(false);
+    }
+  };
 
   return (
-    <Box className="fade-in">
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        Energy Predictions
-      </Typography>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 4 }}>
-        Generate and view energy consumption predictions
-      </Typography>
+    <Box>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h4" fontWeight={800}>
+            Predictions
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Forecasted consumption with confidence intervals.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <TextField
+            select
+            size="small"
+            label="Horizon"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            sx={{ minWidth: 140 }}
+          >
+            {HORIZONS.map((h) => (
+              <MenuItem key={h} value={h}>
+                {h} day{h > 1 ? "s" : ""}
+              </MenuItem>
+            ))}
+          </TextField>
+          {user?.is_superuser && (
+            <Button
+              variant="outlined"
+              startIcon={<ModelTrainingRounded />}
+              onClick={handleTrain}
+              disabled={training}
+            >
+              {training ? "Training…" : "Retrain model"}
+            </Button>
+          )}
+        </Stack>
+      </Stack>
 
-      {/* Prediction Form */}
-      {loading ? (
-        <FormSkeleton />
-      ) : (
-        <Card sx={{ mb: 4 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Generate New Prediction
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+      {trainingResult && (
+        <Alert
+          severity={trainingResult.type}
+          sx={{ mb: 3 }}
+          onClose={() => setTrainingResult(null)}
+        >
+          {trainingResult.message}
+        </Alert>
+      )}
+
+      <Grid container spacing={2.5} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={4}>
+          <StatCard
+            icon={<AutoGraphRounded />}
+            label="Average forecast"
+            value={fmtKwh(stats.avg)}
+            accent="#059669"
+            loading={loading}
+          />
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <StatCard
+            icon={<TrendingUpRounded />}
+            label="Peak forecast"
+            value={fmtKwh(stats.peak)}
+            accent="#dc2626"
+            loading={loading}
+          />
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <StatCard
+            icon={<TimelineRounded />}
+            label="Lowest forecast"
+            value={fmtKwh(stats.low)}
+            accent="#3b82f6"
+            loading={loading}
+          />
+        </Grid>
+      </Grid>
+
+      <Card>
+        <CardHeader
+          title={`Forecast — next ${days} day${days > 1 ? "s" : ""}`}
+          action={
+            <Chip
+              size="small"
+              label="Model + confidence band"
+              sx={{
+                backgroundColor: "rgba(59,130,246,0.1)",
+                color: "secondary.dark",
+                fontWeight: 700,
+              }}
+            />
+          }
+        />
+        <CardContent sx={{ pt: 0 }}>
+          {loading ? (
+            <Skeleton variant="rounded" height={340} />
+          ) : chartData.length === 0 ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ py: 6, textAlign: "center" }}
+            >
+              No forecast data available.
             </Typography>
-            <Divider sx={{ mb: 3 }} />
-
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
-                <FormControl fullWidth>
-                  <InputLabel id="meter-select-label">Select Meters</InputLabel>
-                  <Select
-                    labelId="meter-select-label"
-                    id="meter-select"
-                    multiple
-                    value={selectedMeters}
-                    onChange={handleMeterChange}
-                    renderValue={(selected) => (
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                        {selected.map((value) => (
-                          <Chip key={value} label={value} size="small" />
-                        ))}
-                      </Box>
-                    )}
-                  >
-                    {meterIds.map((meter) => (
-                      <MenuItem key={meter} value={meter}>
-                        {meter}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              <Grid item xs={12} md={3}>
-                <TextField
-                  fullWidth
-                  id="start-date"
-                  name="start"
-                  label="Start Date"
-                  type="date"
-                  value={dateRange.start}
-                  onChange={handleDateChange}
-                  InputLabelProps={{
-                    shrink: true,
-                  }}
-                />
-              </Grid>
-
-              <Grid item xs={12} md={3}>
-                <TextField
-                  fullWidth
-                  id="end-date"
-                  name="end"
-                  label="End Date"
-                  type="date"
-                  value={dateRange.end}
-                  onChange={handleDateChange}
-                  InputLabelProps={{
-                    shrink: true,
-                  }}
-                />
-              </Grid>
-
-              <Grid
-                item
-                xs={12}
-                md={2}
-                sx={{ display: "flex", alignItems: "center" }}
+          ) : (
+            <ResponsiveContainer width="100%" height={340}>
+              <ComposedChart
+                data={chartData}
+                margin={{ top: 10, right: 10, left: -14, bottom: 0 }}
               >
-                <Button
-                  variant="contained"
-                  fullWidth
-                  startIcon={
-                    submitting ? (
-                      <CircularProgress size={20} color="inherit" />
-                    ) : (
-                      <SendIcon />
-                    )
-                  }
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
-                  {submitting ? "Generating..." : "Generate"}
-                </Button>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Prediction Results */}
-      {loading ? (
-        <ResultsSkeleton />
-      ) : (
-        <Card>
-          <CardContent>
-            <Box
-              sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                mb: 2,
-              }}
-            >
-              <Box>
-                <Typography variant="h6" gutterBottom>
-                  Prediction Results
-                </Typography>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <CalendarIcon fontSize="small" color="action" />
-                  <Typography variant="body2" color="text.secondary">
-                    {dateRange.start} to {dateRange.end}
-                  </Typography>
-                  <Chip
-                    label={selectedMeters.join(", ")}
-                    size="small"
-                    sx={{
-                      backgroundColor: `${theme.palette.primary.light}20`,
-                      color: theme.palette.primary.main,
-                    }}
-                  />
-                </Box>
-              </Box>
-              <Button variant="outlined" startIcon={<TimelineIcon />}>
-                Export Data
-              </Button>
-            </Box>
-
-            <Divider sx={{ mb: 3 }} />
-
-            {/* Prediction Chart */}
-            <Box sx={{ height: 400, mb: 4 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={chartData}
-                  margin={{
-                    top: 20,
-                    right: 30,
-                    left: 20,
-                    bottom: 10,
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="prediction"
-                    name="Prediction"
-                    stroke={theme.palette.primary.main}
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                    activeDot={{ r: 6 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="upper"
-                    name="Upper Bound"
-                    stroke={theme.palette.grey[400]}
-                    strokeDasharray="3 3"
-                    dot={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="lower"
-                    name="Lower Bound"
-                    stroke={theme.palette.grey[400]}
-                    strokeDasharray="3 3"
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </Box>
-
-            {/* Prediction Table */}
-            <TableContainer
-              component={Paper}
-              sx={{
-                boxShadow: "none",
-                border: `1px solid ${theme.palette.divider}`,
-              }}
-            >
-              <Table sx={{ minWidth: 650 }} aria-label="prediction table">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Timestamp</TableCell>
-                    <TableCell align="right">Prediction (kWh)</TableCell>
-                    <TableCell align="right">Lower Bound</TableCell>
-                    <TableCell align="right">Upper Bound</TableCell>
-                    <TableCell align="right">Confidence</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {predictionData.map((row) => (
-                    <TableRow
-                      key={row.timestamp}
-                      sx={{ "&:last-child td, &:last-child th": { border: 0 } }}
-                    >
-                      <TableCell component="th" scope="row">
-                        {row.timestamp}
-                      </TableCell>
-                      <TableCell align="right">
-                        {row.prediction.toFixed(1)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {row.lower.toFixed(1)}
-                      </TableCell>
-                      <TableCell align="right">
-                        {row.upper.toFixed(1)}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Chip
-                          label="95%"
-                          size="small"
-                          sx={{
-                            backgroundColor: `${theme.palette.success.light}20`,
-                            color: theme.palette.success.main,
-                          }}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </CardContent>
-        </Card>
-      )}
+                <defs>
+                  <linearGradient id="bandGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.18} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#EEF2F6" />
+                <XAxis
+                  dataKey="timestamp"
+                  tick={{ fontSize: 11 }}
+                  stroke="#94A3B8"
+                  minTickGap={24}
+                />
+                <YAxis tick={{ fontSize: 12 }} stroke="#94A3B8" />
+                <ChartTooltip formatter={(value) => fmtKwh(value)} />
+                <Area
+                  type="monotone"
+                  dataKey="upper"
+                  stroke="none"
+                  fill="url(#bandGradient)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="lower"
+                  stroke="none"
+                  fill="#fff"
+                  fillOpacity={1}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="predicted"
+                  stroke="#059669"
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
     </Box>
   );
 };

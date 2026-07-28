@@ -1,143 +1,84 @@
-# Web-Frontend Directory
+# Web Frontend — Fluxora
 
-## Overview
+The React web client for Fluxora, an energy intelligence platform. It ships a public
+marketing homepage, email/password authentication, and a protected dashboard shell —
+all fully wired to the FastAPI backend in `code/backend`.
 
-The `web-frontend` directory contains the web application frontend for the Fluxora energy forecasting platform. This directory houses the React-based codebase that powers the Fluxora web interface, providing users with a rich, interactive experience for energy data visualization and forecasting.
+## What's here
 
-## Purpose
-
-The web frontend serves as the primary user interface to the Fluxora platform, allowing users to:
-
-- View comprehensive energy consumption dashboards
-- Access and interpret forecasting predictions
-- Analyze historical energy usage patterns
-- Configure system settings and user preferences
-- Interact with data visualizations and reports
+- **Public site**: Homepage (`/`), Sign in (`/signin`), Sign up (`/signup`)
+- **Protected app** (behind `/dashboard/*`): Overview, Predictions, Analytics, Data
+  Records (full CRUD), Settings
+- **Auth**: JWT access + refresh tokens, persisted in `localStorage`, with automatic
+  silent refresh on 401 responses and forced logout when the refresh token expires
+- **Design system**: a single set of tokens (emerald primary `#059669`, blue accent
+  `#3b82f6`, Inter typeface) shared conceptually with the mobile app
 
 ## Structure
 
-The web frontend follows a modern React project structure, organized to promote maintainability and scalability:
-
 ```
 web-frontend/
-├── dist/               # Built application files
-├── src/                # Source code
-│   ├── components/     # Reusable UI components
-│   │   ├── Header.jsx
-│   │   ├── Layout.jsx
-│   │   └── Sidebar.jsx
-│   ├── pages/          # Page components
-│   │   ├── Analytics.jsx
-│   │   ├── Dashboard.jsx
-│   │   ├── Predictions.jsx
-│   │   └── Settings.jsx
-│   ├── utils/          # Utility functions
-│   │   ├── api.js      # API integration
-│   │   └── dataService.js
-│   ├── tests/          # Test files
-│   ├── App.jsx         # Main application component
-│   ├── index.css       # Global styles
-│   ├── main.jsx        # Application entry point
-│   └── theme.js        # Theming configuration
-├── index.html          # HTML entry point
-├── package.json        # Dependencies and scripts
-├── vite.config.js      # Build configuration
-└── jest.config.js      # Test configuration
+├── src/
+│   ├── components/       # Shell (Header, Sidebar, Layout), route guards, shared UI
+│   ├── context/
+│   │   └── AuthContext.jsx   # Login/register/logout, session bootstrap
+│   ├── pages/
+│   │   ├── Home.jsx           # Public marketing landing page (default route)
+│   │   ├── SignIn.jsx
+│   │   ├── SignUp.jsx
+│   │   ├── Dashboard.jsx      # Overview: summary stats, weekly chart, recent readings
+│   │   ├── Analytics.jsx      # Week/Month/Year rollups
+│   │   ├── Predictions.jsx    # Forecast chart + admin "retrain" action
+│   │   ├── DataRecords.jsx    # Full CRUD over energy readings
+│   │   ├── Settings.jsx       # Account profile + local preferences
+│   │   └── NotFound.jsx
+│   ├── utils/api.js       # Axios client, token storage, every backend call
+│   ├── App.jsx             # Routing (public vs. protected)
+│   └── theme.js            # MUI theme / design tokens
+├── .env.example
+└── vite.config.js
 ```
 
-## Technology Stack
-
-The web frontend is built with:
-
-- **React**: UI library for component-based development
-- **Vite**: Build tool for fast development and optimized production builds
-- **CSS/SCSS**: For styling components
-- **Jest**: Testing framework
-- **React Testing Library**: For component testing
-- **Axios/Fetch**: For API communication
-
-## Development
-
-### Prerequisites
-
-- Node.js (LTS version)
-- npm or yarn
-- Git
-
-### Setup
+## Getting started
 
 ```bash
-# Install dependencies
 cd web-frontend
 npm install
-
-# Start development server
+cp .env.example .env   # defaults to http://localhost:8000
 npm run dev
 ```
 
-### Development Workflow
+The app starts on the homepage. From there you can sign up, sign in, and you'll land
+on `/dashboard`. Visiting `/dashboard/*` while signed out redirects you to `/signin`;
+visiting `/signin` or `/signup` while already signed in redirects you to `/dashboard`.
 
-1. Create a feature branch from the main branch
-2. Implement the feature or fix
-3. Write tests for the new code
-4. Run the test suite to ensure all tests pass
-5. Submit a pull request for review
+Make sure the backend is running first (see `code/backend/README.md` or the repo
+root docs) — every screen after sign-in calls the real API, there is no mock mode.
 
-## Testing
+### Environment variables
 
-The web frontend includes a comprehensive testing strategy:
+| Variable            | Default                 | Description                     |
+| ------------------- | ----------------------- | ------------------------------- |
+| `VITE_API_BASE_URL` | `http://localhost:8000` | Base URL of the FastAPI backend |
+| `VITE_API_TIMEOUT`  | `30000`                 | Request timeout in ms           |
 
-- **Unit Tests**: For testing individual components and functions
-- **Integration Tests**: For testing component interactions
-- **End-to-End Tests**: For testing complete user flows
-
-Run tests using:
+## Building for production
 
 ```bash
-npm test
+npm run build   # outputs to dist/
+npm run preview # serve the production build locally
 ```
 
-## Building for Production
+## Backend integration
 
-To build the application for production:
+Every network call lives in `src/utils/api.js`:
 
-```bash
-npm run build
-```
+- `loginRequest` / `registerRequest` / `fetchCurrentUser` → `/v1/auth/*`
+- `getDataRecords` / `createDataRecord` / `updateDataRecord` / `deleteDataRecord` → `/v1/data/*`
+- `getAnalytics` / `getAnalyticsSummary` → `/v1/analytics/*`
+- `getPredictions` / `triggerTraining` → `/v1/predictions/*`
+- `getHealthStatus` → `/health` (used on the public homepage to show live system status)
 
-This creates optimized files in the `dist/` directory, ready for deployment.
-
-## Integration with Backend
-
-The web frontend integrates with the Fluxora backend through:
-
-- RESTful API calls defined in `utils/api.js`
-- Data services that transform and prepare data for presentation
-
-## Design System
-
-The web frontend follows a consistent design system that includes:
-
-- Typography guidelines
-- Color palette defined in `theme.js`
-- Component styling patterns
-- Responsive design principles
-- Accessibility considerations
-
-## Performance Considerations
-
-To ensure optimal performance:
-
-- Code splitting for reduced initial load time
-- Lazy loading of components and routes
-- Optimized asset loading
-- Memoization for expensive calculations
-- Efficient state management
-
-## Related Components
-
-The web frontend interacts with:
-
-- **Backend API**: For data retrieval and updates
-- **Authentication Services**: For user authentication
-- **Analytics**: For usage tracking and analysis
+Requests automatically attach the stored access token; a 401 triggers a silent
+refresh-token exchange, and if that also fails the user is signed out and returned
+to the homepage.

@@ -1,378 +1,385 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { ScrollView, StyleSheet, View } from "react-native";
 import {
-  Appbar,
+  Avatar,
   Button,
   Card,
+  Chip,
   Dialog,
   Divider,
-  List,
-  Paragraph,
+  HelperText,
   Portal,
+  Snackbar,
   Switch,
+  Text,
   TextInput,
   Title,
-  useTheme,
 } from "react-native-paper";
-import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../contexts/AuthContext";
+import { API_BASE_URL } from "../constants/config";
+import { colors, fontSize, shadows, spacing } from "../styles/theme";
 
-const SettingsScreen = ({ navigation }) => {
-  const theme = useTheme();
-  const { user, logout } = useAuth();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
-  const [profileDialogVisible, setProfileDialogVisible] = useState(false);
-  const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
-  const [username, setUsername] = useState(user?.username || "");
+const initialsFromEmail = (email = "") => email.slice(0, 2).toUpperCase();
+
+export default function SettingsScreen({ navigation }) {
+  const { user, logout, updateProfile, deleteAccount } = useAuth();
+  const [notifications, setNotifications] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+  const [snackbar, setSnackbar] = useState(null);
+
+  // Profile edit form
   const [email, setEmail] = useState(user?.email || "");
+  const [newPassword, setNewPassword] = useState("");
+  const [profileError, setProfileError] = useState(null);
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
 
-  // Load settings from storage on mount
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+  // Danger zone
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
-  const loadSettings = async () => {
-    try {
-      const notifications = await AsyncStorage.getItem("notificationsEnabled");
-      const darkMode = await AsyncStorage.getItem("darkModeEnabled");
-
-      if (notifications !== null) {
-        setNotificationsEnabled(JSON.parse(notifications));
-      }
-      if (darkMode !== null) {
-        setDarkModeEnabled(JSON.parse(darkMode));
-      }
-    } catch (error) {
-      console.error("Failed to load settings:", error);
-    }
-  };
-
-  const toggleNotifications = async () => {
-    const newValue = !notificationsEnabled;
-    setNotificationsEnabled(newValue);
-    try {
-      await AsyncStorage.setItem(
-        "notificationsEnabled",
-        JSON.stringify(newValue),
-      );
-      Alert.alert(
-        "Notifications",
-        `Notifications ${newValue ? "enabled" : "disabled"} successfully`,
-      );
-    } catch (error) {
-      console.error("Failed to save notification setting:", error);
-      // Revert on error
-      setNotificationsEnabled(!newValue);
-    }
-  };
-
-  const toggleDarkMode = async () => {
-    const newValue = !darkModeEnabled;
-    setDarkModeEnabled(newValue);
-    try {
-      await AsyncStorage.setItem("darkModeEnabled", JSON.stringify(newValue));
-      Alert.alert(
-        "Theme",
-        `Dark mode ${newValue ? "enabled" : "disabled"}. Please restart the app for changes to take full effect.`,
-      );
-    } catch (error) {
-      console.error("Failed to save dark mode setting:", error);
-      // Revert on error
-      setDarkModeEnabled(!newValue);
-    }
-  };
-
-  const showProfileDialog = () => {
-    setUsername(user?.username || "");
-    setEmail(user?.email || "");
-    setProfileDialogVisible(true);
-  };
-
-  const hideProfileDialog = () => {
-    setProfileDialogVisible(false);
-  };
-
-  const saveProfile = async () => {
-    if (!username.trim() || !email.trim()) {
-      Alert.alert("Validation Error", "Username and email cannot be empty");
-      return;
-    }
-
-    try {
-      // In a real app, this would call an API to update the profile
-      const updatedUser = { ...user, username, email };
-      await AsyncStorage.setItem("user", JSON.stringify(updatedUser));
-
-      Alert.alert("Success", "Profile updated successfully");
-      hideProfileDialog();
-
-      // In a real implementation, you would also update the auth context
-      // For now, user needs to restart the app to see changes
-    } catch (error) {
-      console.error("Failed to update profile:", error);
-      Alert.alert("Error", "Failed to update profile. Please try again.");
-    }
-  };
-
-  const showLogoutDialog = () => {
-    setLogoutDialogVisible(true);
-  };
-
-  const hideLogoutDialog = () => {
-    setLogoutDialogVisible(false);
+  const handlePreferenceChange = (setter) => (value) => {
+    setter(value);
+    setSnackbar("Preference saved");
   };
 
   const handleLogout = async () => {
-    try {
-      await logout();
-      hideLogoutDialog();
-      // Navigation will be handled by auth state change
-      Alert.alert("Success", "Logged out successfully");
-    } catch (error) {
-      console.error("Logout failed:", error);
-      Alert.alert("Error", "Failed to logout. Please try again.");
+    await logout();
+    navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+  };
+
+  const handleProfileSave = async () => {
+    setProfileError(null);
+    const payload = {};
+    if (email && email !== user?.email) payload.email = email;
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        setProfileError("New password must be at least 8 characters long.");
+        return;
+      }
+      payload.password = newPassword;
+    }
+    if (Object.keys(payload).length === 0) {
+      setSnackbar("Nothing to update");
+      return;
+    }
+    setProfileSubmitting(true);
+    const result = await updateProfile(payload);
+    setProfileSubmitting(false);
+    if (result.success) {
+      setNewPassword("");
+      setSnackbar("Profile updated");
+    } else {
+      setProfileError(result.error);
     }
   };
 
-  const clearCache = async () => {
-    Alert.alert(
-      "Clear Cache",
-      "Are you sure you want to clear all cached data?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              // Clear all cached data except user and settings
-              const keys = await AsyncStorage.getAllKeys();
-              const keysToRemove = keys.filter(
-                (key) =>
-                  ![
-                    "user",
-                    "token",
-                    "notificationsEnabled",
-                    "darkModeEnabled",
-                  ].includes(key),
-              );
-              await AsyncStorage.multiRemove(keysToRemove);
-              Alert.alert("Success", "Cache cleared successfully");
-            } catch (error) {
-              console.error("Failed to clear cache:", error);
-              Alert.alert("Error", "Failed to clear cache");
-            }
-          },
-        },
-      ],
-    );
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    const result = await deleteAccount();
+    setDeleting(false);
+    if (result.success) {
+      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+    } else {
+      setDeleteDialogVisible(false);
+      setSnackbar(result.error);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.Content title="Settings" />
-      </Appbar.Header>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <Text style={styles.heading}>Settings</Text>
+        <Text style={styles.subheading}>
+          Manage your account and app preferences.
+        </Text>
 
-      <ScrollView style={styles.content}>
-        {/* Preferences Section */}
-        <List.Section title="Preferences">
-          <List.Item
-            title="Enable Notifications"
-            description="Receive alerts for predictions and anomalies"
-            left={() => <List.Icon icon="bell" />}
-            right={() => (
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={toggleNotifications}
-                color={theme.colors.primary}
-              />
-            )}
-          />
-          <Divider />
-          <List.Item
-            title="Dark Mode"
-            description="Apply dark theme across the app"
-            left={() => <List.Icon icon="theme-light-dark" />}
-            right={() => (
-              <Switch
-                value={darkModeEnabled}
-                onValueChange={toggleDarkMode}
-                color={theme.colors.primary}
-              />
-            )}
-          />
-        </List.Section>
-
-        <Divider style={styles.divider} />
-
-        {/* Account Section */}
-        <List.Section title="Account">
-          <List.Item
-            title="Profile"
-            description="View and edit your profile"
-            left={() => <List.Icon icon="account-circle-outline" />}
-            onPress={showProfileDialog}
-          />
-          <List.Item
-            title="Change Password"
-            description="Update your account password"
-            left={() => <List.Icon icon="lock-outline" />}
-            onPress={() =>
-              Alert.alert(
-                "Coming Soon",
-                "Password change feature will be available soon",
-              )
-            }
-          />
-          <Divider />
-          <List.Item
-            title="Logout"
-            description="Sign out from your account"
-            left={() => <List.Icon icon="logout" color="red" />}
-            onPress={showLogoutDialog}
-            titleStyle={{ color: "red" }}
-          />
-        </List.Section>
-
-        <Divider style={styles.divider} />
-
-        {/* Data & Storage Section */}
-        <List.Section title="Data & Storage">
-          <List.Item
-            title="Clear Cache"
-            description="Free up space by clearing cached data"
-            left={() => <List.Icon icon="delete-outline" />}
-            onPress={clearCache}
-          />
-          <List.Item
-            title="Data Usage"
-            description="View app data consumption"
-            left={() => <List.Icon icon="chart-arc" />}
-            onPress={() =>
-              Alert.alert(
-                "Coming Soon",
-                "Data usage statistics will be available soon",
-              )
-            }
-          />
-        </List.Section>
-
-        <Divider style={styles.divider} />
-
-        {/* About Section */}
-        <Card style={styles.card}>
+        <Card style={[styles.card, shadows.small]}>
           <Card.Content>
-            <Title>About Fluxora</Title>
-            <Paragraph>Version: {APP_CONFIG.VERSION}</Paragraph>
-            <Paragraph>
-              Fluxora is an advanced energy forecasting and optimization
-              platform that helps you monitor and manage energy consumption
-              patterns.
-            </Paragraph>
-            <Paragraph style={styles.copyright}>
-              © 2024 Fluxora. All rights reserved.
-            </Paragraph>
-          </Card.Content>
-          <Card.Actions>
-            <Button
-              onPress={() =>
-                Alert.alert(
-                  "Terms",
-                  "Terms of Service content will be displayed here",
-                )
-              }
-            >
-              Terms of Service
-            </Button>
-            <Button
-              onPress={() =>
-                Alert.alert(
-                  "Privacy",
-                  "Privacy Policy content will be displayed here",
-                )
-              }
-            >
-              Privacy Policy
-            </Button>
-          </Card.Actions>
-        </Card>
-      </ScrollView>
+            <View style={styles.profileRow}>
+              <Avatar.Text
+                size={56}
+                label={user ? initialsFromEmail(user.email) : "FX"}
+                style={{ backgroundColor: colors.primary }}
+              />
+              <View style={{ marginLeft: spacing.md, flex: 1 }}>
+                <Text style={styles.email} numberOfLines={1}>
+                  {user?.email}
+                </Text>
+                <Chip
+                  compact
+                  style={{
+                    alignSelf: "flex-start",
+                    marginTop: 4,
+                    backgroundColor: user?.is_superuser
+                      ? "rgba(59,130,246,0.12)"
+                      : "rgba(5,150,105,0.12)",
+                  }}
+                  textStyle={{
+                    color: user?.is_superuser
+                      ? colors.secondaryDark
+                      : colors.primaryDark,
+                    fontWeight: "700",
+                    fontSize: fontSize.xs,
+                  }}
+                >
+                  {user?.is_superuser ? "Administrator" : "Member"}
+                </Chip>
+              </View>
+            </View>
 
-      {/* Profile Dialog */}
-      <Portal>
-        <Dialog visible={profileDialogVisible} onDismiss={hideProfileDialog}>
-          <Dialog.Title>Edit Profile</Dialog.Title>
-          <Dialog.Content>
-            <TextInput
-              label="Username"
-              value={username}
-              onChangeText={setUsername}
-              mode="outlined"
-              style={styles.input}
+            <Divider style={{ marginVertical: spacing.md }} />
+
+            <InfoRow label="User ID" value={`#${user?.id ?? "—"}`} />
+            <InfoRow
+              label="Account status"
+              value={user?.is_active ? "Active" : "Inactive"}
             />
+
+            <Button
+              mode="outlined"
+              icon="logout"
+              textColor={colors.error}
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
+              Log out
+            </Button>
+          </Card.Content>
+        </Card>
+
+        <Card style={[styles.card, shadows.small]}>
+          <Card.Content>
+            <Title style={styles.cardTitle}>Edit profile</Title>
+            {profileError && (
+              <HelperText
+                type="error"
+                visible
+                style={{ marginBottom: spacing.xs }}
+              >
+                {profileError}
+              </HelperText>
+            )}
             <TextInput
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
+              label="Email address"
               mode="outlined"
               keyboardType="email-address"
               autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
               style={styles.input}
+            />
+            <TextInput
+              label="New password"
+              mode="outlined"
+              secureTextEntry
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="Leave blank to keep current password"
+              style={styles.input}
+            />
+            <Button
+              mode="contained"
+              onPress={handleProfileSave}
+              loading={profileSubmitting}
+              disabled={profileSubmitting}
+              style={{ borderRadius: 10, marginTop: spacing.xs }}
+            >
+              Save changes
+            </Button>
+          </Card.Content>
+        </Card>
+
+        <Card style={[styles.card, shadows.small]}>
+          <Card.Content>
+            <Title style={styles.cardTitle}>Preferences</Title>
+            <Text style={styles.cardSubtitle}>
+              Applied locally on this device
+            </Text>
+
+            <PreferenceRow
+              icon="weather-night"
+              title="Dark mode"
+              description="Coming soon"
+              value={darkMode}
+              onChange={handlePreferenceChange(setDarkMode)}
+              disabled
+            />
+            <Divider />
+            <PreferenceRow
+              icon="bell-outline"
+              title="Push notifications"
+              description="Alerts for unusual consumption"
+              value={notifications}
+              onChange={handlePreferenceChange(setNotifications)}
+            />
+          </Card.Content>
+        </Card>
+
+        <Card
+          style={[
+            styles.card,
+            shadows.small,
+            { borderColor: colors.error, borderWidth: 1 },
+          ]}
+        >
+          <Card.Content>
+            <Title style={[styles.cardTitle, { color: colors.error }]}>
+              Danger zone
+            </Title>
+            <Text style={styles.cardSubtitle}>
+              Permanently deletes your account and every energy reading
+              you&apos;ve logged.
+            </Text>
+            <Button
+              mode="outlined"
+              icon="delete-forever-outline"
+              textColor={colors.error}
+              style={{
+                borderColor: colors.error,
+                borderRadius: 10,
+                marginTop: spacing.sm,
+              }}
+              onPress={() => setDeleteDialogVisible(true)}
+            >
+              Delete account
+            </Button>
+          </Card.Content>
+        </Card>
+
+        <Card
+          style={[styles.card, shadows.small, { marginBottom: spacing.xxl }]}
+        >
+          <Card.Content>
+            <Title style={styles.cardTitle}>API connection</Title>
+            <InfoRow label="Backend" value={API_BASE_URL} />
+            <InfoRow label="Auth method" value="JWT (access + refresh)" />
+            <InfoRow label="API version" value="v1" />
+          </Card.Content>
+        </Card>
+      </ScrollView>
+
+      <Portal>
+        <Dialog
+          visible={deleteDialogVisible}
+          onDismiss={() => setDeleteDialogVisible(false)}
+        >
+          <Dialog.Title>Delete your account?</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ marginBottom: spacing.sm }}>
+              This permanently deletes your account and all of your energy data.
+              This cannot be undone. Type DELETE to confirm.
+            </Text>
+            <TextInput
+              mode="outlined"
+              placeholder="DELETE"
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              autoCapitalize="characters"
             />
           </Dialog.Content>
           <Dialog.Actions>
-            <Button onPress={hideProfileDialog}>Cancel</Button>
-            <Button onPress={saveProfile}>Save</Button>
-          </Dialog.Actions>
-        </Dialog>
-
-        {/* Logout Confirmation Dialog */}
-        <Dialog visible={logoutDialogVisible} onDismiss={hideLogoutDialog}>
-          <Dialog.Title>Confirm Logout</Dialog.Title>
-          <Dialog.Content>
-            <Paragraph>Are you sure you want to log out?</Paragraph>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={hideLogoutDialog}>Cancel</Button>
-            <Button onPress={handleLogout} textColor="red">
-              Logout
+            <Button onPress={() => setDeleteDialogVisible(false)}>
+              Cancel
+            </Button>
+            <Button
+              onPress={handleDeleteAccount}
+              loading={deleting}
+              disabled={deleteConfirmText !== "DELETE" || deleting}
+              textColor={colors.error}
+            >
+              Delete my account
             </Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      <Snackbar
+        visible={!!snackbar}
+        onDismiss={() => setSnackbar(null)}
+        duration={2200}
+      >
+        {snackbar}
+      </Snackbar>
     </View>
   );
-};
+}
+
+const InfoRow = ({ label, value }) => (
+  <View style={styles.infoRow}>
+    <Text style={styles.infoLabel}>{label}</Text>
+    <Text style={styles.infoValue} numberOfLines={1}>
+      {value}
+    </Text>
+  </View>
+);
+
+const PreferenceRow = ({
+  icon,
+  title,
+  description,
+  value,
+  onChange,
+  disabled,
+}) => (
+  <View style={styles.prefRow}>
+    <View style={{ flex: 1 }}>
+      <Text style={styles.prefTitle}>{title}</Text>
+      <Text style={styles.prefDesc}>{description}</Text>
+    </View>
+    <Switch
+      value={value}
+      onValueChange={onChange}
+      disabled={disabled}
+      color={colors.primary}
+    />
+  </View>
+);
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
+  root: { flex: 1 },
+  scrollContent: { padding: spacing.lg },
+  heading: { fontSize: fontSize.xl, fontWeight: "800" },
+  subheading: {
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.md,
   },
-  content: {
-    flex: 1,
+  card: { borderRadius: 16, marginBottom: spacing.md },
+  cardTitle: { fontSize: fontSize.md },
+  cardSubtitle: {
+    color: colors.textMuted,
+    fontSize: fontSize.xs,
+    marginBottom: spacing.sm,
   },
-  divider: {
-    marginVertical: 10,
+  profileRow: { flexDirection: "row", alignItems: "center" },
+  email: { fontWeight: "700", fontSize: fontSize.md },
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: spacing.xs,
   },
-  card: {
-    margin: 15,
-    elevation: 3,
+  infoLabel: { color: colors.textSecondary, fontSize: fontSize.sm },
+  infoValue: {
+    fontWeight: "600",
+    fontSize: fontSize.sm,
+    flexShrink: 1,
+    marginLeft: spacing.sm,
   },
-  input: {
-    marginBottom: 15,
+  logoutButton: {
+    marginTop: spacing.md,
+    borderRadius: 10,
+    borderColor: colors.error,
   },
-  copyright: {
-    marginTop: 10,
-    fontSize: 12,
-    color: "#999",
+  input: { marginBottom: spacing.sm, backgroundColor: colors.surface },
+  prefRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: spacing.sm,
   },
+  prefTitle: { fontWeight: "600" },
+  prefDesc: { color: colors.textMuted, fontSize: fontSize.xs },
 });
-
-export default SettingsScreen;

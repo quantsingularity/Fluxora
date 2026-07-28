@@ -80,12 +80,13 @@ async def log_requests(request: Request, call_next: Any) -> Any:
     return response
 
 
-from app.api.v1 import analytics, auth, data, predictions  # noqa: E402
+from app.api.v1 import analytics, auth, data, predictions, users  # noqa: E402
 
 app.include_router(auth.router, prefix="/v1")
 app.include_router(data.router, prefix="/v1")
 app.include_router(analytics.router, prefix="/v1")
 app.include_router(predictions.router, prefix="/v1")
+app.include_router(users.router, prefix="/v1")
 
 
 @app.get("/health", tags=["system"])

@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 from app.core.security import get_current_active_user
 from app.crud.data import get_data_by_time_range
@@ -45,6 +46,52 @@ def _compute_efficiency(consumption: pd.Series, temperature: pd.Series) -> pd.Se
         return pd.Series(100.0, index=consumption.index)
     efficiency = 100.0 * (1.0 - consumption / (max_consumption + 1e-9))
     return efficiency.clip(lower=0.0, upper=100.0)
+
+
+def generate_mock_analytics(period: str) -> List[Dict[str, Any]]:
+    """
+    Generate a physically plausible placeholder series when the user has no
+    recorded data yet for the requested period.
+
+    Bug fix: this previously returned a single hardcoded 3-point list
+    (labelled "Day 1" / "Day 2" / "Day 3") regardless of which period was
+    requested. Selecting ``period=year`` therefore silently returned three
+    day-labelled points instead of a year's worth of week-labelled points —
+    inconsistent with what ``calculate_analytics`` produces for real data,
+    and misleading in any UI that renders the ``label``/point-count as if
+    it reflected the requested period.
+    """
+    now = datetime.now(timezone.utc)
+    rng = np.random.default_rng()
+
+    if period == "week":
+        n_points, step, unit = 7, timedelta(days=1), "day"
+    elif period == "year":
+        n_points, step, unit = 52, timedelta(weeks=1), "week"
+    else:  # month
+        n_points, step, unit = 30, timedelta(days=1), "day"
+
+    results: List[Dict[str, Any]] = []
+    for i in range(n_points):
+        ts = now - step * (n_points - 1 - i)
+        phase = (i / max(n_points, 1)) * 2 * np.pi
+        consumption = max(float(45 + 12 * np.sin(phase) + rng.normal(0, 4)), 0.0)
+        temperature = float(18 + 6 * np.sin(phase) + rng.normal(0, 1))
+        cost = consumption * 0.12
+        efficiency = max(0.0, min(100.0, 100.0 * (1.0 - consumption / 90.0)))
+        label = (
+            f"Week {ts.isocalendar()[1]}" if unit == "week" else ts.strftime("%Y-%m-%d")
+        )
+        results.append(
+            {
+                "label": label,
+                "consumption": round(consumption, 2),
+                "cost": round(cost, 2),
+                "temperature": round(temperature, 2),
+                "efficiency": round(efficiency, 2),
+            }
+        )
+    return results
 
 
 def calculate_analytics(records: List[EnergyData], period: str) -> List[Dict[str, Any]]:
@@ -127,31 +174,6 @@ def calculate_analytics(records: List[EnergyData], period: str) -> List[Dict[str
     return results
 
 
-_MOCK_ANALYTICS = [
-    {
-        "label": "Day 1",
-        "consumption": 50.5,
-        "cost": 5.05,
-        "temperature": 20.1,
-        "efficiency": 75.0,
-    },
-    {
-        "label": "Day 2",
-        "consumption": 60.2,
-        "cost": 6.02,
-        "temperature": 22.5,
-        "efficiency": 70.5,
-    },
-    {
-        "label": "Day 3",
-        "consumption": 45.1,
-        "cost": 4.51,
-        "temperature": 18.9,
-        "efficiency": 80.1,
-    },
-]
-
-
 @router.get("/", response_model=List[AnalyticsPoint])
 def get_analytics(
     current_user: Annotated[User, Depends(get_current_active_user)],
@@ -174,7 +196,7 @@ def get_analytics(
         db, user_id=current_user.id, start_time=start_naive, end_time=end_naive
     )
     if not records:
-        return _MOCK_ANALYTICS
+        return generate_mock_analytics(period)
 
     try:
         return calculate_analytics(records, period)

@@ -1,386 +1,434 @@
 import {
-  Delete as DeleteIcon,
-  Language as LanguageIcon,
-  Notifications as NotificationsIcon,
-  Refresh as RefreshIcon,
-  Save as SaveIcon,
-  Security as SecurityIcon,
-  Storage as StorageIcon,
-  ColorLens as ThemeIcon,
+  BadgeOutlined,
+  DarkModeOutlined,
+  DeleteForeverRounded,
+  EmailOutlined,
+  LogoutRounded,
+  NotificationsOutlined,
+  ShieldOutlined,
+  VerifiedUser,
 } from "@mui/icons-material";
 import {
   Alert,
+  Avatar,
   Box,
   Button,
   Card,
   CardContent,
+  CardHeader,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   Grid,
-  IconButton,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemSecondaryAction,
-  ListItemText,
   Skeleton,
-  Snackbar,
+  Stack,
   Switch,
   TextField,
   Typography,
-  useTheme,
 } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const initialsFromEmail = (email = "") => email.slice(0, 2).toUpperCase();
 
 const Settings = () => {
-  const _theme = useTheme();
-  const [loading, setLoading] = useState(true);
-  const [settings, setSettings] = useState({
-    notifications: true,
-    darkMode: false,
-    dataRetention: 90,
-    apiKey: "sk_test_51HG7LkKF5YG78D6H2QsJgYbIhaeEDq",
-    language: "en",
-    autoRefresh: true,
-  });
-  const [snackbar, setSnackbar] = useState({
-    open: false,
-    message: "",
-    severity: "success",
-  });
+  const { user, isInitializing, logout, updateProfile, deleteAccount } =
+    useAuth();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    // Simulate loading settings from API
-    const loadSettings = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      setLoading(false);
-    };
+  const [darkMode, setDarkMode] = useState(false);
+  const [notifications, setNotifications] = useState(true);
+  const [savedMessage, setSavedMessage] = useState(false);
 
-    loadSettings();
-  }, []);
+  // Profile edit form
+  const [email, setEmail] = useState(user?.email || "");
+  const [newPassword, setNewPassword] = useState("");
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const [profileError, setProfileError] = useState(null);
+  const [profileSuccess, setProfileSuccess] = useState(false);
 
-  const handleSettingChange = (setting, value) => {
-    setSettings({
-      ...settings,
-      [setting]: value,
-    });
+  // Danger zone
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  const handlePreferenceChange = (setter) => (event) => {
+    setter(event.target.checked);
+    setSavedMessage(true);
+    setTimeout(() => setSavedMessage(false), 1800);
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    handleSettingChange(name, value);
+  const handleLogout = () => {
+    logout();
+    navigate("/");
   };
 
-  const handleSwitchChange = (e) => {
-    const { name, checked } = e.target;
-    handleSettingChange(name, checked);
+  const handleProfileSubmit = async (event) => {
+    event.preventDefault();
+    setProfileError(null);
+    setProfileSuccess(false);
+
+    const payload = {};
+    if (email && email !== user?.email) payload.email = email;
+    if (newPassword) {
+      if (newPassword.length < 8) {
+        setProfileError("New password must be at least 8 characters long.");
+        return;
+      }
+      payload.password = newPassword;
+    }
+    if (Object.keys(payload).length === 0) {
+      setProfileSuccess(true);
+      setTimeout(() => setProfileSuccess(false), 1800);
+      return;
+    }
+
+    setProfileSubmitting(true);
+    const result = await updateProfile(payload);
+    setProfileSubmitting(false);
+
+    if (result.success) {
+      setNewPassword("");
+      setProfileSuccess(true);
+      setTimeout(() => setProfileSuccess(false), 2500);
+    } else {
+      setProfileError(result.error);
+    }
   };
 
-  const handleSaveSettings = () => {
-    // Simulate saving settings to API
-    setSnackbar({
-      open: true,
-      message: "Settings saved successfully!",
-      severity: "success",
-    });
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    const result = await deleteAccount();
+    setDeleting(false);
+    if (result.success) {
+      navigate("/");
+    } else {
+      setDeleteError(result.error);
+    }
   };
-
-  const handleCloseSnackbar = () => {
-    setSnackbar({
-      ...snackbar,
-      open: false,
-    });
-  };
-
-  const handleResetApiKey = () => {
-    handleSettingChange(
-      "apiKey",
-      `sk_test_${Math.random().toString(36).substring(2, 15)}`,
-    );
-    setSnackbar({
-      open: true,
-      message: "API key regenerated successfully!",
-      severity: "info",
-    });
-  };
-
-  // Skeleton loader for settings
-  const SettingsSkeleton = () => (
-    <List>
-      <ListItem>
-        <ListItemIcon>
-          <Skeleton variant="circular" width={24} height={24} />
-        </ListItemIcon>
-        <ListItemText
-          primary={<Skeleton variant="text" width={120} />}
-          secondary={<Skeleton variant="text" width={200} />}
-        />
-        <ListItemSecondaryAction>
-          <Skeleton variant="rectangular" width={40} height={24} />
-        </ListItemSecondaryAction>
-      </ListItem>
-      <ListItem>
-        <ListItemIcon>
-          <Skeleton variant="circular" width={24} height={24} />
-        </ListItemIcon>
-        <ListItemText
-          primary={<Skeleton variant="text" width={100} />}
-          secondary={<Skeleton variant="text" width={180} />}
-        />
-        <ListItemSecondaryAction>
-          <Skeleton variant="rectangular" width={40} height={24} />
-        </ListItemSecondaryAction>
-      </ListItem>
-      <ListItem>
-        <ListItemIcon>
-          <Skeleton variant="circular" width={24} height={24} />
-        </ListItemIcon>
-        <ListItemText
-          primary={<Skeleton variant="text" width={80} />}
-          secondary={<Skeleton variant="text" width={160} />}
-        />
-        <ListItemSecondaryAction>
-          <Skeleton variant="rectangular" width={100} height={40} />
-        </ListItemSecondaryAction>
-      </ListItem>
-    </List>
-  );
 
   return (
-    <Box className="fade-in">
-      <Typography variant="h4" fontWeight="bold" gutterBottom>
-        Settings
-      </Typography>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 4 }}>
-        Configure application preferences and account settings
-      </Typography>
+    <Box>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" fontWeight={800}>
+          Settings
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Manage your account and application preferences.
+        </Typography>
+      </Box>
 
-      <Grid container spacing={3}>
-        {/* General Settings */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                General Settings
-              </Typography>
-              <Divider sx={{ mb: 3 }} />
-
-              {loading ? (
-                <SettingsSkeleton />
+      <Grid container spacing={2.5}>
+        <Grid item xs={12} md={5}>
+          <Card>
+            <CardHeader title="Account" />
+            <CardContent sx={{ pt: 0 }}>
+              {isInitializing ? (
+                <Stack spacing={2}>
+                  <Skeleton variant="circular" width={64} height={64} />
+                  <Skeleton width="80%" />
+                  <Skeleton width="60%" />
+                </Stack>
               ) : (
-                <List>
-                  <ListItem>
-                    <ListItemIcon>
-                      <NotificationsIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Notifications"
-                      secondary="Enable push notifications for alerts and updates"
-                    />
-                    <ListItemSecondaryAction>
-                      <Switch
-                        edge="end"
-                        name="notifications"
-                        checked={settings.notifications}
-                        onChange={handleSwitchChange}
-                      />
-                    </ListItemSecondaryAction>
-                  </ListItem>
-
-                  <ListItem>
-                    <ListItemIcon>
-                      <ThemeIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Dark Mode"
-                      secondary="Switch between light and dark theme"
-                    />
-                    <ListItemSecondaryAction>
-                      <Switch
-                        edge="end"
-                        name="darkMode"
-                        checked={settings.darkMode}
-                        onChange={handleSwitchChange}
-                      />
-                    </ListItemSecondaryAction>
-                  </ListItem>
-
-                  <ListItem>
-                    <ListItemIcon>
-                      <LanguageIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Language"
-                      secondary="Select your preferred language"
-                    />
-                    <ListItemSecondaryAction>
-                      <TextField
-                        select
-                        name="language"
-                        value={settings.language}
-                        onChange={handleInputChange}
-                        SelectProps={{
-                          native: true,
-                        }}
-                        variant="outlined"
+                <Stack spacing={2.5}>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Avatar
+                      sx={{
+                        width: 64,
+                        height: 64,
+                        fontSize: "1.4rem",
+                        fontWeight: 700,
+                        background: "linear-gradient(135deg, #10b981, #3b82f6)",
+                      }}
+                    >
+                      {initialsFromEmail(user?.email)}
+                    </Avatar>
+                    <Box>
+                      <Typography variant="subtitle1" fontWeight={700}>
+                        {user?.email}
+                      </Typography>
+                      <Chip
                         size="small"
-                        sx={{ width: 100 }}
-                      >
-                        <option value="en">English</option>
-                        <option value="es">Spanish</option>
-                        <option value="fr">French</option>
-                        <option value="de">German</option>
-                      </TextField>
-                    </ListItemSecondaryAction>
-                  </ListItem>
-
-                  <ListItem>
-                    <ListItemIcon>
-                      <RefreshIcon />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Auto Refresh"
-                      secondary="Automatically refresh data every minute"
-                    />
-                    <ListItemSecondaryAction>
-                      <Switch
-                        edge="end"
-                        name="autoRefresh"
-                        checked={settings.autoRefresh}
-                        onChange={handleSwitchChange}
+                        icon={
+                          user?.is_superuser ? (
+                            <VerifiedUser sx={{ fontSize: 14 }} />
+                          ) : undefined
+                        }
+                        label={user?.is_superuser ? "Administrator" : "Member"}
+                        sx={{
+                          mt: 0.5,
+                          backgroundColor: user?.is_superuser
+                            ? "rgba(59,130,246,0.1)"
+                            : "rgba(5,150,105,0.1)",
+                          color: user?.is_superuser
+                            ? "secondary.dark"
+                            : "primary.dark",
+                          fontWeight: 700,
+                        }}
                       />
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                </List>
+                    </Box>
+                  </Stack>
+
+                  <Divider />
+
+                  <Stack spacing={1.75}>
+                    <InfoRow
+                      icon={<BadgeOutlined fontSize="small" />}
+                      label="User ID"
+                      value={`#${user?.id}`}
+                    />
+                    <InfoRow
+                      icon={<EmailOutlined fontSize="small" />}
+                      label="Email"
+                      value={user?.email}
+                    />
+                    <InfoRow
+                      icon={<ShieldOutlined fontSize="small" />}
+                      label="Account status"
+                      value={
+                        <Chip
+                          size="small"
+                          label={user?.is_active ? "Active" : "Inactive"}
+                          color={user?.is_active ? "success" : "default"}
+                          sx={{ fontWeight: 700 }}
+                        />
+                      }
+                    />
+                  </Stack>
+
+                  <Divider />
+
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<LogoutRounded />}
+                    onClick={handleLogout}
+                    fullWidth
+                  >
+                    Log out
+                  </Button>
+                </Stack>
               )}
             </CardContent>
           </Card>
         </Grid>
 
-        {/* Data & Security */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ height: "100%" }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Data & Security
-              </Typography>
-              <Divider sx={{ mb: 3 }} />
-
-              {loading ? (
-                <SettingsSkeleton />
-              ) : (
-                <>
-                  <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        <StorageIcon />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Data Retention"
-                        secondary="Number of days to keep historical data"
-                      />
-                      <ListItemSecondaryAction>
-                        <TextField
-                          name="dataRetention"
-                          value={settings.dataRetention}
-                          onChange={handleInputChange}
-                          type="number"
-                          variant="outlined"
-                          size="small"
-                          sx={{ width: 100 }}
-                          InputProps={{
-                            endAdornment: (
-                              <Typography variant="caption">days</Typography>
-                            ),
-                          }}
-                        />
-                      </ListItemSecondaryAction>
-                    </ListItem>
-
-                    <ListItem>
-                      <ListItemIcon>
-                        <SecurityIcon />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="API Key"
-                        secondary="Your secret API key for accessing the Fluxora API"
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton
-                          edge="end"
-                          aria-label="regenerate"
-                          onClick={handleResetApiKey}
-                          color="primary"
-                        >
-                          <RefreshIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-
-                    <ListItem>
-                      <TextField
-                        fullWidth
-                        name="apiKey"
-                        value={settings.apiKey}
-                        onChange={handleInputChange}
-                        variant="outlined"
-                        size="small"
-                        type="password"
-                        InputProps={{
-                          readOnly: true,
-                        }}
-                      />
-                    </ListItem>
-
-                    <ListItem>
-                      <Alert severity="warning" sx={{ width: "100%" }}>
-                        Regenerating your API key will invalidate the previous
-                        key immediately.
-                      </Alert>
-                    </ListItem>
-                  </List>
-
-                  <Box sx={{ mt: 3 }}>
+        <Grid item xs={12} md={7}>
+          <Card>
+            <CardHeader
+              title="Edit profile"
+              subheader="Update your email or password"
+            />
+            <CardContent sx={{ pt: 0 }}>
+              {profileError && (
+                <Alert
+                  severity="error"
+                  sx={{ mb: 2 }}
+                  onClose={() => setProfileError(null)}
+                >
+                  {profileError}
+                </Alert>
+              )}
+              {profileSuccess && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  Profile updated.
+                </Alert>
+              )}
+              <Box component="form" onSubmit={handleProfileSubmit}>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Email address"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="New password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    helperText="Leave blank to keep your current password"
+                    fullWidth
+                  />
+                  <Box>
                     <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                      sx={{ mr: 2 }}
-                    >
-                      Clear All Data
-                    </Button>
-
-                    <Button
+                      type="submit"
                       variant="contained"
-                      color="primary"
-                      startIcon={<SaveIcon />}
-                      onClick={handleSaveSettings}
+                      disabled={profileSubmitting}
                     >
-                      Save Settings
+                      {profileSubmitting ? "Saving…" : "Save changes"}
                     </Button>
                   </Box>
-                </>
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ mt: 2.5 }}>
+            <CardHeader
+              title="Preferences"
+              subheader="Applied locally to this browser"
+            />
+            <CardContent sx={{ pt: 0 }}>
+              {savedMessage && (
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  Preference saved.
+                </Alert>
               )}
+              <Stack divider={<Divider />} spacing={2}>
+                <PreferenceRow
+                  icon={<DarkModeOutlined />}
+                  title="Dark mode"
+                  description="Switch the interface to a darker palette (coming soon)."
+                  checked={darkMode}
+                  onChange={handlePreferenceChange(setDarkMode)}
+                  disabled
+                />
+                <PreferenceRow
+                  icon={<NotificationsOutlined />}
+                  title="Email notifications"
+                  description="Receive a summary when unusual consumption is detected."
+                  checked={notifications}
+                  onChange={handlePreferenceChange(setNotifications)}
+                />
+              </Stack>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ mt: 2.5, borderColor: "error.main" }}>
+            <CardHeader
+              title="Danger zone"
+              titleTypographyProps={{ color: "error.main", fontWeight: 700 }}
+            />
+            <CardContent sx={{ pt: 0 }}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                justifyContent="space-between"
+                alignItems={{ sm: "center" }}
+                spacing={2}
+              >
+                <Box>
+                  <Typography variant="subtitle2" fontWeight={700}>
+                    Delete account
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Permanently deletes your account and every energy reading
+                    you&apos;ve logged.
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteForeverRounded />}
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  Delete account
+                </Button>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
       >
-        <Alert
-          onClose={handleCloseSnackbar}
-          severity={snackbar.severity}
-          sx={{ width: "100%" }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
+        <DialogTitle>Delete your account?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            This permanently deletes your account and all of your energy data.
+            This cannot be undone. Type <strong>DELETE</strong> to confirm.
+          </DialogContentText>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {deleteError}
+            </Alert>
+          )}
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="DELETE"
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setDeleteDialogOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteAccount}
+            color="error"
+            variant="contained"
+            disabled={deleteConfirmText !== "DELETE" || deleting}
+          >
+            {deleting ? "Deleting…" : "Delete my account"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
+
+const InfoRow = ({ icon, label, value }) => (
+  <Stack direction="row" alignItems="center" justifyContent="space-between">
+    <Stack
+      direction="row"
+      spacing={1}
+      alignItems="center"
+      color="text.secondary"
+    >
+      {icon}
+      <Typography variant="body2">{label}</Typography>
+    </Stack>
+    {typeof value === "string" ? (
+      <Typography variant="body2" fontWeight={600}>
+        {value}
+      </Typography>
+    ) : (
+      value
+    )}
+  </Stack>
+);
+
+const PreferenceRow = ({
+  icon,
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+}) => (
+  <Stack
+    direction="row"
+    alignItems="center"
+    justifyContent="space-between"
+    spacing={2}
+  >
+    <Stack direction="row" spacing={2} alignItems="flex-start">
+      <Box sx={{ color: "text.secondary", mt: 0.25 }}>{icon}</Box>
+      <Box>
+        <Typography variant="subtitle2" fontWeight={700}>
+          {title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {description}
+        </Typography>
+      </Box>
+    </Stack>
+    <Switch checked={checked} onChange={onChange} disabled={disabled} />
+  </Stack>
+);
 
 export default Settings;

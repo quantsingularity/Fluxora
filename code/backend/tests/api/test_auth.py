@@ -216,3 +216,149 @@ def test_get_current_user_superuser_flag(client: TestClient, superuser_auth_head
     response = client.get("/v1/auth/me", headers=superuser_auth_headers)
     assert response.status_code == 200
     assert response.json()["is_superuser"] is True
+
+
+# ---------------------------------------------------------------------------
+# PATCH /me (self-service profile update)
+# ---------------------------------------------------------------------------
+
+
+def test_update_current_user_email(client: TestClient, auth_headers: dict):
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"email": "updated-me@example.com"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"]["email"] == "updated-me@example.com"
+
+
+def test_update_current_user_email_reissues_tokens(
+    client: TestClient, auth_headers: dict
+):
+    """Regression test: JWTs are keyed on email (the ``sub`` claim), so
+    changing it must return a fresh token pair in the same response --
+    otherwise the caller's existing access token silently stops resolving
+    to any user on their very next request, indistinguishable from being
+    logged out immediately after saving."""
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"email": "reissue-me@example.com"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"]
+    assert body["refresh_token"]
+    assert body["token_type"] == "bearer"
+
+    # The old token must no longer work (email it was issued for is gone)...
+    stale = client.get("/v1/auth/me", headers=auth_headers)
+    assert stale.status_code == 401
+
+    # ...but the freshly issued token continues the session seamlessly.
+    new_headers = {"Authorization": f"Bearer {body['access_token']}"}
+    me = client.get("/v1/auth/me", headers=new_headers)
+    assert me.status_code == 200
+    assert me.json()["email"] == "reissue-me@example.com"
+
+
+def test_update_current_user_password_only_does_not_reissue_tokens(
+    client: TestClient, auth_headers: dict
+):
+    """A password-only change doesn't touch the JWT subject, so the
+    caller's current access token must keep working without needing new
+    tokens."""
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"password": "brandnewpass123"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"] is None
+    assert body["refresh_token"] is None
+    still_valid = client.get("/v1/auth/me", headers=auth_headers)
+    assert still_valid.status_code == 200
+
+
+def test_update_current_user_password_allows_new_login(
+    client: TestClient, auth_headers: dict
+):
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"password": "brandnewpass123"}
+    )
+    assert response.status_code == 200
+    login = client.post(
+        "/v1/auth/token",
+        data={"username": "test@example.com", "password": "brandnewpass123"},
+    )
+    assert login.status_code == 200
+
+
+def test_update_current_user_no_fields_is_noop(client: TestClient, auth_headers: dict):
+    response = client.patch("/v1/auth/me", headers=auth_headers, json={})
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "test@example.com"
+
+
+def test_update_current_user_duplicate_email_rejected(
+    client: TestClient, auth_headers: dict, superuser
+):
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"email": superuser.email}
+    )
+    assert response.status_code == 400
+
+
+def test_update_current_user_weak_password_rejected(
+    client: TestClient, auth_headers: dict
+):
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"password": "short"}
+    )
+    assert response.status_code == 422
+
+
+def test_update_current_user_cannot_set_is_active(
+    client: TestClient, auth_headers: dict
+):
+    """UserProfileUpdate has no is_active field, so this must be ignored
+    rather than silently deactivating the caller's own account."""
+    response = client.patch(
+        "/v1/auth/me", headers=auth_headers, json={"is_active": False}
+    )
+    assert response.status_code == 200
+    me = client.get("/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 200
+    assert me.json()["is_active"] is True
+
+
+def test_update_current_user_unauthenticated(client: TestClient):
+    response = client.patch("/v1/auth/me", json={"email": "x@example.com"})
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# DELETE /me (self-service account deletion)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_current_user(client: TestClient, auth_headers: dict):
+    response = client.delete("/v1/auth/me", headers=auth_headers)
+    assert response.status_code == 204
+    # The account no longer exists, so the same token can no longer resolve
+    # to a user.
+    me = client.get("/v1/auth/me", headers=auth_headers)
+    assert me.status_code == 401
+
+
+def test_delete_current_user_cascades_energy_data(
+    client: TestClient, auth_headers: dict
+):
+    create = client.post(
+        "/v1/data/", headers=auth_headers, json={"consumption_kwh": 10.0}
+    )
+    assert create.status_code == 201
+    response = client.delete("/v1/auth/me", headers=auth_headers)
+    assert response.status_code == 204
+
+
+def test_delete_current_user_unauthenticated(client: TestClient):
+    response = client.delete("/v1/auth/me")
+    assert response.status_code == 401
