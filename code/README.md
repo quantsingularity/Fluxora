@@ -5,7 +5,7 @@ Energy data management and ML-powered consumption prediction platform.
 ## Project Structure
 
 ```
-fluxora/
+code/
 ├── backend/          # FastAPI REST API
 │   ├── app/
 │   │   ├── api/v1/   # Route handlers (auth, data, analytics, predictions)
