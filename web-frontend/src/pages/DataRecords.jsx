@@ -40,11 +40,11 @@ import {
 const fmtKwh = (n) =>
   n != null
     ? `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`
-    : "—";
+    : "N/A";
 const fmtUsd = (n) =>
   n != null
     ? `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    : "—";
+    : "N/A";
 
 const DataRecords = () => {
   const [records, setRecords] = useState([]);
@@ -145,8 +145,7 @@ const DataRecords = () => {
             Data Records
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Every meter reading tied to your account — add, edit, or remove
-            entries.
+            Add, edit, or remove any meter reading tied to your account.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1.5}>
@@ -229,12 +228,12 @@ const DataRecords = () => {
                         <TableCell align="right">
                           {r.temperature_c != null
                             ? `${r.temperature_c}°C`
-                            : "—"}
+                            : "N/A"}
                         </TableCell>
                         <TableCell align="right">
                           {r.humidity_percent != null
                             ? `${r.humidity_percent}%`
-                            : "—"}
+                            : "N/A"}
                         </TableCell>
                         <TableCell align="right">
                           <Tooltip title="Edit">

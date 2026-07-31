@@ -67,7 +67,7 @@ export default function SignUpScreen({ navigation }) {
         </View>
         <Title style={styles.title}>Create your account</Title>
         <Text style={styles.subtitle}>
-          Takes less than a minute — no credit card required.
+          Takes less than a minute, no credit card required.
         </Text>
 
         {error && (

@@ -199,7 +199,7 @@ const Predictions = () => {
 
       <Card>
         <CardHeader
-          title={`Forecast — next ${days} day${days > 1 ? "s" : ""}`}
+          title={`Forecast: next ${days} day${days > 1 ? "s" : ""}`}
           action={
             <Chip
               size="small"

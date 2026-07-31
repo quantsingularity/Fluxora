@@ -117,7 +117,7 @@ const SignIn = () => {
           variant="body1"
           sx={{ color: "rgba(255,255,255,0.6)", maxWidth: 420 }}
         >
-          Pick up right where you left off — live forecasts, analytics and your
+          Pick up right where you left off: live forecasts, analytics and your
           full data history are waiting.
         </Typography>
       </Box>

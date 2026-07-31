@@ -5,7 +5,7 @@ import MaterialCommunityIcons from "react-native-vector-icons/MaterialCommunityI
 import { StatusBar } from "expo-status-bar";
 import { getHealthStatus } from "../api/api";
 import { useAuth } from "../contexts/AuthContext";
-import { colors, fontSize, shadows, spacing } from "../styles/theme";
+import { colors, fontSize, spacing } from "../styles/theme";
 
 const FEATURES = [
   {
@@ -88,7 +88,7 @@ export default function HomeScreen({ navigation }) {
           </Title>
           <Text style={styles.heroSubtitle}>
             Fluxora forecasts consumption, tracks cost, and scores efficiency
-            from your own metered data — fully synced with a real backend.
+            from your own metered data, fully synced with a real backend.
           </Text>
 
           <View style={styles.ctaRow}>
@@ -209,26 +209,32 @@ const styles = StyleSheet.create({
   secondaryButton: { borderRadius: 12, borderColor: "rgba(255,255,255,0.35)" },
   buttonContent: { paddingVertical: 6 },
   featuresSection: {
-    backgroundColor: colors.background,
     paddingTop: spacing.xl,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
   },
   sectionEyebrow: {
-    color: colors.primary,
+    color: colors.primaryLight,
     fontWeight: "700",
     fontSize: fontSize.xs,
     letterSpacing: 1,
     marginBottom: spacing.xs,
   },
   sectionTitle: {
+    color: "#fff",
     fontSize: fontSize.xl,
     marginBottom: spacing.lg,
     lineHeight: 28,
   },
-  featureCard: { marginBottom: spacing.md, borderRadius: 16, ...shadows.small },
+  featureCard: {
+    marginBottom: spacing.md,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
   featureContent: { flexDirection: "row", alignItems: "center" },
   featureIcon: {
     width: 42,
@@ -239,12 +245,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: spacing.md,
   },
-  featureTitle: { fontWeight: "700", fontSize: fontSize.md, marginBottom: 2 },
-  featureDesc: { color: colors.textSecondary, fontSize: fontSize.sm },
+  featureTitle: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: fontSize.md,
+    marginBottom: 2,
+  },
+  featureDesc: { color: "rgba(255,255,255,0.65)", fontSize: fontSize.sm },
   footer: {
     alignItems: "center",
     paddingVertical: spacing.lg,
-    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
   },
-  footerText: { color: colors.textMuted, fontSize: fontSize.xs },
+  footerText: { color: "rgba(255,255,255,0.45)", fontSize: fontSize.xs },
 });

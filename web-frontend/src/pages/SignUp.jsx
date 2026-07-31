@@ -170,7 +170,7 @@ const SignUp = () => {
           <Stack spacing={0.5} sx={{ mb: 3.5 }}>
             <Typography variant="h4">Create your account</Typography>
             <Typography variant="body2" color="text.secondary">
-              Takes less than a minute — no credit card required.
+              Takes less than a minute, no credit card required.
             </Typography>
           </Stack>
 

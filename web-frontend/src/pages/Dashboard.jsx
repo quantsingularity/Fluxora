@@ -186,7 +186,7 @@ const Dashboard = () => {
           <StatCard
             icon={<TimelineRounded />}
             label="Predicted Peak (24h)"
-            value={nextPeak !== null ? fmtKwh(nextPeak) : "—"}
+            value={nextPeak !== null ? fmtKwh(nextPeak) : "N/A"}
             hint="From forecasting model"
             accent="#dc2626"
             loading={loading}
@@ -350,15 +350,15 @@ const Dashboard = () => {
                           <TableCell align="right">
                             {r.generation_kwh != null
                               ? fmtKwh(r.generation_kwh)
-                              : "—"}
+                              : "N/A"}
                           </TableCell>
                           <TableCell align="right">
-                            {r.cost_usd != null ? fmtUsd(r.cost_usd) : "—"}
+                            {r.cost_usd != null ? fmtUsd(r.cost_usd) : "N/A"}
                           </TableCell>
                           <TableCell align="right">
                             {r.temperature_c != null
                               ? `${r.temperature_c}°C`
-                              : "—"}
+                              : "N/A"}
                           </TableCell>
                         </TableRow>
                       ))}

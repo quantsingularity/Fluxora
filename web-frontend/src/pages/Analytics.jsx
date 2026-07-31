@@ -160,7 +160,7 @@ const Analytics = () => {
             icon={<ThermostatRounded />}
             label="Avg Temperature"
             value={
-              totals.avgTemp != null ? `${totals.avgTemp.toFixed(1)}°C` : "—"
+              totals.avgTemp != null ? `${totals.avgTemp.toFixed(1)}°C` : "N/A"
             }
             accent="#dc2626"
             loading={loading}
@@ -260,7 +260,9 @@ const Analytics = () => {
                       </TableCell>
                       <TableCell align="right">{fmtUsd(row.cost)}</TableCell>
                       <TableCell align="right">
-                        {row.temperature != null ? `${row.temperature}°C` : "—"}
+                        {row.temperature != null
+                          ? `${row.temperature}°C`
+                          : "N/A"}
                       </TableCell>
                       <TableCell align="right">{row.efficiency}%</TableCell>
                     </TableRow>

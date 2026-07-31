@@ -49,7 +49,7 @@ const features = [
   {
     icon: <CloudSyncRounded />,
     title: "Live backend sync",
-    desc: "Every screen talks directly to the Fluxora FastAPI backend — no static demo data once you're signed in.",
+    desc: "Every screen talks directly to the Fluxora FastAPI backend, with no static demo data once you're signed in.",
   },
   {
     icon: <TrendingUpRounded />,
@@ -175,7 +175,7 @@ const Home = () => {
               }}
             >
               Fluxora forecasts consumption, tracks cost, and scores efficiency
-              from your own metered data — with a real FastAPI backend behind
+              from your own metered data, with a real FastAPI backend behind
               every chart on this site.
             </Typography>
             <Stack
@@ -238,7 +238,10 @@ const Home = () => {
       {/* Features */}
       <Box
         id="platform"
-        sx={{ backgroundColor: "#f8fafc", py: { xs: 8, md: 12 } }}
+        sx={{
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          py: { xs: 8, md: 12 },
+        }}
       >
         <Container maxWidth="lg">
           <Stack
@@ -253,15 +256,14 @@ const Home = () => {
               variant="outlined"
               sx={{ fontWeight: 700 }}
             />
-            <Typography variant="h2" sx={{ maxWidth: 640 }}>
+            <Typography variant="h2" sx={{ color: "#fff", maxWidth: 640 }}>
               Everything you need to understand your energy footprint
             </Typography>
             <Typography
               variant="body1"
-              color="text.secondary"
-              sx={{ maxWidth: 560 }}
+              sx={{ color: "rgba(255,255,255,0.65)", maxWidth: 560 }}
             >
-              Every module below is wired to the live Fluxora API — sign up to
+              Every module below is wired to the live Fluxora API, so sign up to
               see your own data flow through it.
             </Typography>
           </Stack>
@@ -269,7 +271,15 @@ const Home = () => {
           <Grid container spacing={3}>
             {features.map((f) => (
               <Grid item xs={12} sm={6} md={4} key={f.title}>
-                <Paper sx={{ p: 3.5, height: "100%" }} elevation={0}>
+                <Paper
+                  sx={{
+                    p: 3.5,
+                    height: "100%",
+                    backgroundColor: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                  elevation={0}
+                >
                   <Box
                     sx={{
                       width: 44,
@@ -285,10 +295,18 @@ const Home = () => {
                   >
                     {f.icon}
                   </Box>
-                  <Typography variant="h6" fontWeight={700} gutterBottom>
+                  <Typography
+                    variant="h6"
+                    fontWeight={700}
+                    gutterBottom
+                    sx={{ color: "#fff" }}
+                  >
                     {f.title}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "rgba(255,255,255,0.65)" }}
+                  >
                     {f.desc}
                   </Typography>
                 </Paper>
@@ -301,7 +319,10 @@ const Home = () => {
       {/* How it works / pricing anchor */}
       <Box
         id="pricing"
-        sx={{ py: { xs: 8, md: 12 }, backgroundColor: "#0b1220" }}
+        sx={{
+          py: { xs: 8, md: 12 },
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+        }}
       >
         <Container maxWidth="md">
           <Paper
@@ -367,16 +388,26 @@ const Home = () => {
       </Box>
 
       {/* FAQ */}
-      <Box id="faq" sx={{ backgroundColor: "#f8fafc", py: { xs: 8, md: 10 } }}>
+      <Box
+        id="faq"
+        sx={{
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          py: { xs: 8, md: 10 },
+        }}
+      >
         <Container maxWidth="md">
-          <Typography variant="h2" textAlign="center" sx={{ mb: 5 }}>
+          <Typography
+            variant="h2"
+            textAlign="center"
+            sx={{ color: "#fff", mb: 5 }}
+          >
             Frequently asked questions
           </Typography>
           <Stack spacing={2.5}>
             {[
               {
                 q: "Is this connected to a real backend?",
-                a: "Yes. Every authenticated screen calls the Fluxora FastAPI service for auth, data records, analytics and predictions — there is no mock mode once you sign in.",
+                a: "Yes. Every authenticated screen calls the Fluxora FastAPI service for auth, data records, analytics and predictions, and there is no mock mode once you sign in.",
               },
               {
                 q: "What happens if no trained model is available?",
@@ -384,14 +415,30 @@ const Home = () => {
               },
               {
                 q: "Can I edit or delete a reading after logging it?",
-                a: "Yes — the Data Records page gives you full create, edit and delete control over every reading tied to your account.",
+                a: "Yes. The Data Records page gives you full create, edit and delete control over every reading tied to your account.",
               },
             ].map((item) => (
-              <Paper key={item.q} sx={{ p: 3 }} elevation={0}>
-                <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+              <Paper
+                key={item.q}
+                sx={{
+                  p: 3,
+                  backgroundColor: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+                elevation={0}
+              >
+                <Typography
+                  variant="subtitle1"
+                  fontWeight={700}
+                  gutterBottom
+                  sx={{ color: "#fff" }}
+                >
                   {item.q}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography
+                  variant="body2"
+                  sx={{ color: "rgba(255,255,255,0.65)" }}
+                >
                   {item.a}
                 </Typography>
               </Paper>

@@ -142,7 +142,7 @@ export default function DashboardScreen({ navigation }) {
             <StatCard
               icon="chart-timeline-variant"
               label="Predicted Peak"
-              value={nextPeak != null ? fmtKwh(nextPeak) : "—"}
+              value={nextPeak != null ? fmtKwh(nextPeak) : "N/A"}
               accent={colors.error}
               style={styles.statCardHalf}
             />

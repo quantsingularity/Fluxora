@@ -166,7 +166,7 @@ export default function PredictionsScreen() {
           <Card.Content>
             <View style={styles.cardHeaderRow}>
               <Title style={styles.cardTitle}>
-                Forecast — next {days} day{days !== "1" ? "s" : ""}
+                Forecast: next {days} day{days !== "1" ? "s" : ""}
               </Title>
               <Chip compact style={styles.chip} textStyle={styles.chipText}>
                 Model

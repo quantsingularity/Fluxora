@@ -22,11 +22,11 @@ import { colors, fontSize, spacing } from "../styles/theme";
 const fmtKwh = (n) =>
   n != null
     ? `${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`
-    : "—";
+    : "N/A";
 const fmtUsd = (n) =>
   n != null
     ? `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-    : "—";
+    : "N/A";
 
 export default function DataScreen() {
   const [records, setRecords] = useState([]);

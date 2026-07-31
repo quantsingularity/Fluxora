@@ -133,7 +133,10 @@ export default function SettingsScreen({ navigation }) {
 
             <Divider style={{ marginVertical: spacing.md }} />
 
-            <InfoRow label="User ID" value={`#${user?.id ?? "—"}`} />
+            <InfoRow
+              label="User ID"
+              value={user?.id != null ? `#${user.id}` : "N/A"}
+            />
             <InfoRow
               label="Account status"
               value={user?.is_active ? "Active" : "Inactive"}
